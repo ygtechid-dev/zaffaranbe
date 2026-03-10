@@ -1,0 +1,650 @@
+openapi: 3.0.3
+info:
+  title: Zafaran OpenAPI - WhatsApp Bot Integration
+  description: |
+    API endpoints untuk integrasi dengan WhatsApp Bot.
+    Semua endpoint menggunakan Basic Authentication.
+    
+    **Base URL:** `http://localhost:8001/openapi`
+    
+    **Authentication:**
+    - Type: HTTP Basic Auth
+    - Username: `zafaran`
+    - Password: `openapizafaran2026`
+  version: 1.0.0
+  contact:
+    name: Zafaran API Support
+    email: support@zafaran.com
+
+servers:
+  - url: http://localhost:8001/openapi
+    description: Local Development Server
+  - url: https://api.zafaran.com/openapi
+    description: Production Server
+
+tags:
+  - name: Authentication
+    description: Customer registration and authentication
+  - name: Availability
+    description: Check therapist and schedule availability
+  - name: Reservations
+    description: Create and manage bookings
+  - name: Payments
+    description: Payment creation and status checking
+
+security:
+  - basicAuth: []
+
+paths:
+  /register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new customer
+      description: Create a new customer account in the system
+      operationId: registerCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - phone
+                - password
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: John Doe
+                  description: Full name of the customer
+                email:
+                  type: string
+                  format: email
+                  example: john.doe@example.com
+                  description: Email address (must be unique)
+                phone:
+                  type: string
+                  maxLength: 20
+                  example: "081234567890"
+                  description: Phone number
+                password:
+                  type: string
+                  minLength: 6
+                  format: password
+                  example: password123
+                  description: Account password (min 6 characters)
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: User registered successfully
+                  data:
+                    type: object
+                    properties:
+                      user_id:
+                        type: integer
+                        example: 1
+                      name:
+                        type: string
+                        example: John Doe
+                      email:
+                        type: string
+                        example: john.doe@example.com
+                      phone:
+                        type: string
+                        example: "081234567890"
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /availability:
+    get:
+      tags:
+        - Availability
+      summary: Get available schedule
+      description: Retrieve available therapists and time slots for a specific date and duration
+      operationId: getAvailability
+      parameters:
+        - name: branch_id
+          in: query
+          required: true
+          schema:
+            type: integer
+            example: 1
+          description: Branch ID
+        - name: booking_date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-02-10"
+          description: Booking date in Y-m-d format
+        - name: duration
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 15
+            example: 60
+          description: Service duration in minutes
+      responses:
+        '200':
+          description: Availability data retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TherapistAvailability'
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /reservations:
+    post:
+      tags:
+        - Reservations
+      summary: Create new reservation
+      description: Create a new booking/reservation in the system
+      operationId: createReservation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - branch_id
+                - service_id
+                - therapist_id
+                - booking_date
+                - start_time
+              properties:
+                user_id:
+                  type: integer
+                  example: 1
+                  description: Customer user ID
+                branch_id:
+                  type: integer
+                  example: 1
+                  description: Branch ID
+                service_id:
+                  type: integer
+                  example: 1
+                  description: Service ID
+                therapist_id:
+                  type: integer
+                  example: 1
+                  description: Therapist ID
+                booking_date:
+                  type: string
+                  format: date
+                  example: "2026-02-10"
+                  description: Booking date (Y-m-d)
+                start_time:
+                  type: string
+                  format: time
+                  example: "10:00"
+                  description: Start time (H:i)
+                guest_count:
+                  type: integer
+                  minimum: 1
+                  example: 1
+                  description: Number of guests
+                room_id:
+                  type: integer
+                  nullable: true
+                  example: 1
+                  description: Room ID (optional)
+                notes:
+                  type: string
+                  nullable: true
+                  example: "Special request for quiet room"
+                  description: Additional notes
+      responses:
+        '201':
+          description: Reservation created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Reservation created successfully
+                  data:
+                    $ref: '#/components/schemas/BookingResponse'
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /reservations/{id}/reschedule:
+    put:
+      tags:
+        - Reservations
+      summary: Reschedule booking
+      description: Update the date and time of an existing booking
+      operationId: rescheduleBooking
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 1
+          description: Booking ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - booking_date
+                - start_time
+              properties:
+                booking_date:
+                  type: string
+                  format: date
+                  example: "2026-02-11"
+                  description: New booking date (Y-m-d)
+                start_time:
+                  type: string
+                  format: time
+                  example: "14:00"
+                  description: New start time (H:i)
+                therapist_id:
+                  type: integer
+                  nullable: true
+                  example: 2
+                  description: New therapist ID (optional)
+      responses:
+        '200':
+          description: Booking rescheduled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Booking rescheduled successfully
+                  data:
+                    type: object
+                    properties:
+                      booking_id:
+                        type: integer
+                        example: 1
+                      booking_date:
+                        type: string
+                        format: date
+                        example: "2026-02-11"
+                      start_time:
+                        type: string
+                        format: time
+                        example: "14:00:00"
+                      end_time:
+                        type: string
+                        format: time
+                        example: "15:00:00"
+                      status:
+                        type: string
+                        example: confirmed
+        '400':
+          description: Booking cannot be rescheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: "Booking cannot be rescheduled. Current status: completed"
+        '404':
+          description: Booking not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /payments:
+    post:
+      tags:
+        - Payments
+      summary: Create payment
+      description: Create a new payment record for a booking
+      operationId: createPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - booking_id
+                - payment_method
+                - amount
+              properties:
+                booking_id:
+                  type: integer
+                  example: 1
+                  description: Booking ID
+                payment_method:
+                  type: string
+                  example: cash
+                  enum:
+                    - cash
+                    - transfer
+                    - qris
+                    - credit_card
+                  description: Payment method
+                amount:
+                  type: number
+                  format: float
+                  minimum: 0
+                  example: 150000
+                  description: Payment amount
+      responses:
+        '201':
+          description: Payment created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Payment created successfully
+                  data:
+                    type: object
+                    properties:
+                      payment_id:
+                        type: integer
+                        example: 1
+                      booking_id:
+                        type: integer
+                        example: 1
+                      amount:
+                        type: number
+                        example: 150000
+                      status:
+                        type: string
+                        example: pending
+        '422':
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /payments/{id}/status:
+    get:
+      tags:
+        - Payments
+      summary: Check payment status
+      description: Retrieve the current status of a payment
+      operationId: checkPaymentStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            example: 1
+          description: Payment ID
+      responses:
+        '200':
+          description: Payment status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      payment_id:
+                        type: integer
+                        example: 1
+                      booking_id:
+                        type: integer
+                        example: 1
+                      amount:
+                        type: number
+                        example: 150000
+                      status:
+                        type: string
+                        enum:
+                          - pending
+                          - paid
+                          - failed
+                          - cancelled
+                        example: pending
+                      payment_method:
+                        type: string
+                        example: cash
+                      created_at:
+                        type: string
+                        format: date-time
+                        example: "2026-02-10T10:00:00.000000Z"
+                      updated_at:
+                        type: string
+                        format: date-time
+                        example: "2026-02-10T10:00:00.000000Z"
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: |
+        Basic Authentication using username and password.
+        Credentials are configured in the server's .env file.
+        
+        Default credentials:
+        - Username: zafaran
+        - Password: openapizafaran2026
+
+  schemas:
+    TherapistAvailability:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Jane Smith
+        photo:
+          type: string
+          nullable: true
+          example: "https://example.com/photo.jpg"
+        gender:
+          type: string
+          enum:
+            - male
+            - female
+          example: female
+        specialization:
+          type: string
+          nullable: true
+          example: Traditional Massage
+        shifts:
+          type: array
+          items:
+            type: object
+            properties:
+              start:
+                type: string
+                format: time
+                example: "09:00"
+              end:
+                type: string
+                format: time
+                example: "21:00"
+        slots:
+          type: array
+          items:
+            type: object
+            properties:
+              time:
+                type: string
+                format: time
+                example: "09:00"
+              available:
+                type: boolean
+                example: true
+              disabled:
+                type: boolean
+                example: false
+              reason:
+                type: string
+                nullable: true
+                example: null
+
+    BookingResponse:
+      type: object
+      properties:
+        booking:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 1
+            booking_date:
+              type: string
+              format: date
+              example: "2026-02-10"
+            start_time:
+              type: string
+              format: time
+              example: "10:00:00"
+            end_time:
+              type: string
+              format: time
+              example: "11:00:00"
+            status:
+              type: string
+              enum:
+                - pending
+                - confirmed
+                - completed
+                - cancelled
+              example: pending
+        payment_log_id:
+          type: integer
+          example: 1
+
+    ValidationError:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: Validation failed
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            email:
+              - The email field is required.
+            phone:
+              - The phone field is required.
+
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+          example: An error occurred
+        error:
+          type: string
+          example: Detailed error message

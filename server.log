@@ -1,0 +1,4 @@
+[Mon Feb 23 18:55:46 2026] PHP 8.5.1 Development Server (http://localhost:8001) started
+[Mon Feb 23 18:55:48 2026] [::1]:56706 Accepted
+[Mon Feb 23 18:55:48 2026] [::1]:56706 [401]: GET /api/v1/admin/calendar?branch_id=2&date=2026-02-27&view=day
+[Mon Feb 23 18:55:48 2026] [::1]:56706 Closing
