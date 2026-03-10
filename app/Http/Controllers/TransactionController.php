@@ -360,8 +360,9 @@ class TransactionController extends Controller
 
 
             // 6. Record commissions based on the transaction items
-            $this->recordCommission($transaction);
-
+           if ($paymentType === 'full') {
+    $this->recordCommission($transaction);
+}
             DB::commit();
 
             return response()->json([

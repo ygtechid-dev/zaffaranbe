@@ -416,7 +416,7 @@ class PaymentService
                 if (str_contains(env('APP_URL'), 'localhost')) {
                     $frontendUrl = 'http://localhost:3090';
                 } else {
-                    $frontendUrl = 'https://naqupos-spa-salon.vercel.app';
+                    $frontendUrl = 'https://zafaranuserdev.vercel.app';
                 }
             }
             $callbackUrl = $frontendUrl . '/payment/success/' . $payment->payment_ref; // Use path instead of query param to avoid '?'
