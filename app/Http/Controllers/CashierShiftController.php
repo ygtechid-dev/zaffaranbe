@@ -152,9 +152,14 @@ class CashierShiftController extends Controller
         $nonCashSales = $totalSales - $cashSales;
         $count = (clone $transactions)->count();
 
-        $dpSales = (clone $transactions)->where('notes', 'like', '%[DP]%')->sum('total');
-        $fullSales = (clone $transactions)->where('notes', 'like', '%[Lunas]%')->sum('total');
+   // GANTI BAGIAN INI di currentShift()
+$dpSales = \DB::table('bookings')
+    ->where('branch_id', $shift->branch_id)
+    ->where('payment_status', 'partial')
+    ->whereBetween('created_at', [$shift->clock_in, \Carbon\Carbon::now()])
+    ->sum('total_price');
 
+$fullSales = (clone $transactions)->sum('total');
         // Payment Method Breakdown
         $methodTotals = (clone $transactions)
             ->select('payment_method', \DB::raw('SUM(total) as total_amount'))
