@@ -833,33 +833,34 @@ class PaymentService
                     }
 
                     $firstItem = !empty($items) ? $items[0] : null;
-                    $booking = Booking::create([
-                        'user_id' => $data['user_id'] ?? null,
-                        'branch_id' => $data['branch_id'] ?? null,
-                        'service_id' => $firstItem ? ($firstItem['service_id'] ?? null) : null,
-                        'therapist_id' => $firstItem ? ($firstItem['therapist_id'] ?? null) : null,
-                        'room_id' => $firstItem ? ($firstItem['room_id'] ?? null) : null,
-                        'booking_date' => $firstItem ? $firstItem['booking_date'] : ($data['booking_date'] ?? Carbon::now()->toDateString()),
-                        'start_time' => $firstItem ? $firstItem['start_time'] : null,
-                        'end_time' => $firstItem ? $firstItem['end_time'] : null,
-                        'duration' => $data['duration'] ?? ($firstItem['duration'] ?? 0),
-                        'service_price' => $data['service_price'] ?? ($firstItem['service_price'] ?? 0),
-                        'room_charge' => $data['room_charge'] ?? ($firstItem['room_charge'] ?? 0),
-                        'product_total' => $data['product_total'] ?? 0,
-                        'total_price' => $data['total_price'] ?? ($firstItem['total_price'] ?? 0),
-                        'promo_code' => $data['promo_code'] ?? null,
-                        'discount_amount' => $data['discount_amount'] ?? 0,
-                        'service_charge_amount' => $data['service_charge_amount'] ?? 0,
-                        'tax_amount' => $data['tax_amount'] ?? 0,
-                        'status' => $hasConflict ? 'pending' : 'confirmed',
-                        'payment_status' => $paymentStatus,
-                        'confirmed_at' => $hasConflict ? null : Carbon::now(),
-                        'guest_name' => $firstItem ? ($firstItem['guest_name'] ?? ($data['customer_name'] ?? null)) : ($data['customer_name'] ?? null),
-                        'guest_phone' => $firstItem ? ($firstItem['guest_phone'] ?? ($data['customer_phone'] ?? null)) : ($data['customer_phone'] ?? null),
-                        'guest_type' => $firstItem ? ($firstItem['guest_type'] ?? 'dewasa') : 'dewasa',
-                        'guest_age' => $firstItem ? ($firstItem['guest_age'] ?? null) : null,
-                        'notes' => $consolidatedNotes,
-                    ]);
+                   $booking = Booking::create([
+    'user_id' => $data['user_id'] ?? null,
+    'branch_id' => $data['branch_id'] ?? null,
+    'service_id' => $firstItem ? ($firstItem['service_id'] ?? null) : null,
+    'therapist_id' => $firstItem ? ($firstItem['therapist_id'] ?? null) : null,
+    'room_id' => $firstItem ? ($firstItem['room_id'] ?? null) : null,
+    'booking_date' => $firstItem ? $firstItem['booking_date'] : ($data['booking_date'] ?? Carbon::now()->toDateString()),
+    'start_time' => $firstItem ? $firstItem['start_time'] : null,
+    'end_time' => $firstItem ? $firstItem['end_time'] : null,
+    'duration' => $data['duration'] ?? ($firstItem['duration'] ?? 0),
+    'service_price' => $data['service_price'] ?? ($firstItem['service_price'] ?? 0),
+    'room_charge' => $data['room_charge'] ?? ($firstItem['room_charge'] ?? 0),
+    'product_total' => $data['product_total'] ?? 0,
+    'total_price' => $data['total_price'] ?? ($firstItem['total_price'] ?? 0),
+    'nominal_dp' => $data['nominal_dp'] ?? 0, // TAMBAH INI
+    'promo_code' => $data['promo_code'] ?? null,
+    'discount_amount' => $data['discount_amount'] ?? 0,
+    'service_charge_amount' => $data['service_charge_amount'] ?? 0,
+    'tax_amount' => $data['tax_amount'] ?? 0,
+    'status' => $hasConflict ? 'pending' : 'confirmed',
+    'payment_status' => $paymentStatus,
+    'confirmed_at' => $hasConflict ? null : Carbon::now(),
+    'guest_name' => $firstItem ? ($firstItem['guest_name'] ?? ($data['customer_name'] ?? null)) : ($data['customer_name'] ?? null),
+    'guest_phone' => $firstItem ? ($firstItem['guest_phone'] ?? ($data['customer_phone'] ?? null)) : ($data['customer_phone'] ?? null),
+    'guest_type' => $firstItem ? ($firstItem['guest_type'] ?? 'dewasa') : 'dewasa',
+    'guest_age' => $firstItem ? ($firstItem['guest_age'] ?? null) : null,
+    'notes' => $consolidatedNotes,
+]);
 
                     // Increment Promo Usage
                     if (!empty($data['promo_code'])) {

@@ -62,6 +62,7 @@ class Booking extends Model
         'guest5_age_type',
         'guest5_age',
         'product_total',
+        'nominal_dp'
     ];
 
     protected $appends = ['customer_name'];
@@ -82,6 +83,7 @@ class Booking extends Model
         'room_charge' => 'decimal:2',
         'product_total' => 'decimal:2',
         'discount_amount' => 'decimal:2',
+        'nominal_dp' => 'decimal:2',
         'service_charge_amount' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'total_price' => 'decimal:2',

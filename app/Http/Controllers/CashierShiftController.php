@@ -155,16 +155,23 @@ class CashierShiftController extends Controller
    // GANTI BAGIAN INI di currentShift()
 $dpSales = \DB::table('bookings')
     ->where('branch_id', $shift->branch_id)
-    ->where('payment_status', 'partial')
     ->whereBetween('created_at', [$shift->clock_in, \Carbon\Carbon::now()])
-    ->sum('total_price');
+    ->where('nominal_dp', '>', 0)
+    ->sum('nominal_dp');
 
-$fullSales = (clone $transactions)->sum('total');
-        // Payment Method Breakdown
-        $methodTotals = (clone $transactions)
-            ->select('payment_method', \DB::raw('SUM(total) as total_amount'))
-            ->groupBy('payment_method')
-            ->get();
+$totalTransactionSum = \DB::table('transactions')
+    ->where('branch_id', $shift->branch_id)
+    ->where('cashier_id', auth()->id())
+    ->whereBetween('transaction_date', [$shift->clock_in, \Carbon\Carbon::now()])
+    ->sum('total');
+
+$fullSales = $totalTransactionSum - $dpSales;
+
+// Payment Method Breakdown
+$methodTotals = (clone $transactions)
+    ->select('payment_method', \DB::raw('SUM(total) as total_amount'))
+    ->groupBy('payment_method')
+    ->get();
 
         // Map names from payment_methods table
         $paymentMethods = \DB::table('payment_methods')->get(['code', 'name']);

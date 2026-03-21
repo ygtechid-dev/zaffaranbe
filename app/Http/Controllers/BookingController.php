@@ -817,28 +817,38 @@ $bEnd = Carbon::parse($item->end_time);
         $guestCount = max(1, count($uniqueGuests));
 
         // Prepare consistent booking_data
-        $bookingData = [
-            'user_id' => auth()->id(),
-            'branch_id' => $request->branch_id,
-            'booking_date' => $request->booking_date,
-            'total_price' => $totalPrice,
-            'service_price' => $totalServicePrice,
-            'room_charge' => $totalRoomCharge,
-            'product_total' => $productTotal,
-            'duration' => $totalDuration,
-            'payment_type' => $request->payment_type ?? 'full_payment',
-            'promo_code' => $promo ? $promo->code : null,
-            'discount_amount' => $discountAmount,
-            'service_charge_amount' => $serviceChargeAmount,
-            'tax_amount' => $taxAmount,
-            'items' => $processedItems, // Store all items
-            'guest_count' => $guestCount,
-        ];
+       $bookingData = [
+    'user_id' => auth()->id(),
+    'branch_id' => $request->branch_id,
+    'booking_date' => $request->booking_date,
+    'total_price' => $totalPrice,
+    'service_price' => $totalServicePrice,
+    'room_charge' => $totalRoomCharge,
+    'product_total' => $productTotal,
+    'duration' => $totalDuration,
+    'payment_type' => $request->payment_type ?? 'full_payment',
+    'nominal_dp' => $request->payment_type === 'down_payment' ? ($request->nominal_dp ?? 0) : 0,
+    'promo_code' => $promo ? $promo->code : null,
+    'discount_amount' => $discountAmount,
+    'service_charge_amount' => $serviceChargeAmount,
+    'tax_amount' => $taxAmount,
+    'items' => $processedItems,
+    'guest_count' => $guestCount,
+];
 
         // Always include first item data at root for backward compatibility
         if (count($processedItems) > 0) {
             $bookingData = array_merge($processedItems[0], $bookingData);
         }
+
+        \Log::info('NOMINAL_DP CHECK', [
+    'payment_type' => $request->payment_type,
+    'nominal_dp_request' => $request->nominal_dp,
+    'nominal_dp_in_data' => $bookingData['nominal_dp'],
+    'all_request' => $request->all(),
+]);
+
+
 
         $paymentLog = PaymentLog::create([
             'booking_data' => $bookingData,
@@ -1433,6 +1443,7 @@ $bEnd = Carbon::parse($item->end_time);
             'therapist_id' => $item->therapist_id,
             'room_id' => $item->room_id,
             'service_price' => $item->price,
+            
             'room_charge' => $item->room_charge,
             'total_price' => $item->price + $item->room_charge,
             'guest_count' => 1,
