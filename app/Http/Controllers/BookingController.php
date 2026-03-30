@@ -788,9 +788,12 @@ $bEnd = Carbon::parse($item->end_time);
         $companySettings = \App\Models\CompanySettings::where('branch_id', $request->branch_id)->first()
             ?? \App\Models\CompanySettings::first();
 
-        $taxPercent = $companySettings ? ($companySettings->tax_percentage ?? 0) : 0;
-        $serviceChargePercent = $companySettings ? ($companySettings->service_charge_percentage ?? 0) : 0;
+       $taxPercent = ($companySettings && ($companySettings->is_tax_enabled ?? false))
+    ? ($companySettings->tax_percentage ?? 0) : 0;
+$serviceChargePercent = ($companySettings && ($companySettings->is_service_charge_enabled ?? false))
+    ? ($companySettings->service_charge_percentage ?? 0) : 0;
 
+    
         $serviceChargeAmount = round(($totalPriceBeforeTax * $serviceChargePercent) / 100);
         $taxAmount = round((($totalPriceBeforeTax + $serviceChargeAmount) * $taxPercent) / 100);
 

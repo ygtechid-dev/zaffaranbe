@@ -10,33 +10,49 @@ use Illuminate\Support\Facades\Validator;
 
 class TransactionController extends Controller
 {
-    public function index(Request $request)
-    {
-        $query = Transaction::with(['booking', 'branch:id,name', 'cashier:id,name']);
+   public function index(Request $request)
+{
+    $query = Transaction::with(['booking', 'branch:id,name', 'cashier:id,name']);
 
-        // Filter by cashier's active shift
-        if ($request->has('shift_only') && $request->shift_only) {
-            $activeShift = DB::table('cashier_shifts')
-                ->where('cashier_id', auth()->id())
-                ->whereNull('clock_out')
-                ->first();
+    // Filter by cashier's active shift
+    if ($request->has('shift_only') && $request->shift_only) {
+        $activeShift = DB::table('cashier_shifts')
+            ->where('cashier_id', auth()->id())
+            ->whereNull('clock_out')
+            ->first();
 
-            if ($activeShift) {
-                $query->where('cashier_id', auth()->id())
-                    ->where('transaction_date', '>=', $activeShift->clock_in);
+        if ($activeShift) {
+            $query->where('cashier_id', auth()->id())
+                ->where('transaction_date', '>=', $activeShift->clock_in);
+        }
+    }
+
+    // TAMBAHKAN INI: Filter by shift_id
+    if ($request->has('shift_id') && $request->shift_id) {
+        $shift = DB::table('cashier_shifts')->find($request->shift_id);
+        if ($shift) {
+            $query->where('transaction_date', '>=', $shift->clock_in);
+            if ($shift->clock_out) {
+                $query->where('transaction_date', '<=', $shift->clock_out);
             }
         }
-
-        $perPage = $request->input('per_page', 15);
-        if ($perPage === 'none' || $request->input('all') === 'true') {
-            $transactions = $query->orderBy('transaction_date', 'desc')->get();
-        } else {
-            $transactions = $query->orderBy('transaction_date', 'desc')
-                ->paginate(is_numeric($perPage) ? (int)$perPage : 15);
-        }
-
-        return response()->json($transactions);
     }
+
+    // Filter by branch_id
+    if ($request->has('branch_id') && $request->branch_id) {
+        $query->where('branch_id', $request->branch_id);
+    }
+
+    $perPage = $request->input('per_page', $request->input('limit', 15));
+    if ($perPage === 'none' || $request->input('all') === 'true') {
+        $transactions = $query->orderBy('transaction_date', 'desc')->get();
+    } else {
+        $transactions = $query->orderBy('transaction_date', 'desc')
+            ->paginate(is_numeric($perPage) ? (int)$perPage : 15);
+    }
+
+    return response()->json($transactions);
+}
 
     public function store(Request $request)
     {
@@ -360,9 +376,9 @@ class TransactionController extends Controller
 
 
             // 6. Record commissions based on the transaction items
-           if ($paymentType === 'full') {
-    $this->recordCommission($transaction);
-}
+//            if ($paymentType === 'full') {
+//     $this->recordCommission($transaction);
+// }
             DB::commit();
 
             return response()->json([
