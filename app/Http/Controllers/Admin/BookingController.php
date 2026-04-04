@@ -1229,6 +1229,7 @@ class BookingController extends Controller
                 'end_time' => $newEnd,
                 'duration' => $duration,
                 'therapist_id' => $therapistId,
+                 'is_rescheduled' => true
                 // 'notes' => $sourceBooking->notes . "\nRescheduled item: " . ($request->reason ?? 'Moved via Calendar'),
             ]);
 
@@ -1284,6 +1285,7 @@ class BookingController extends Controller
             'guest_count' => 1,
             'status' => $sourceBooking->status, // Inherit status
             'payment_status' => $sourceBooking->payment_status, // Inherit payment status
+            'is_rescheduled' => true, 
             'notes' => "Rescheduled from {$sourceBooking->booking_ref}. " . ($request->reason ?? ''),
         ]);
 
