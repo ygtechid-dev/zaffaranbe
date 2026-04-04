@@ -62,7 +62,8 @@ class Booking extends Model
         'guest5_age_type',
         'guest5_age',
         'product_total',
-        'nominal_dp'
+        'nominal_dp',
+        'is_rescheduled'
     ];
 
     protected $appends = ['customer_name'];
@@ -94,6 +95,7 @@ class Booking extends Model
         'cancelled_at' => 'datetime',
         'expires_at' => 'datetime',
         'is_blocked' => 'boolean',
+          'is_rescheduled' => 'boolean'
     ];
 
     protected static function boot()
