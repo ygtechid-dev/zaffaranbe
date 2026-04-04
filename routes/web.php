@@ -647,10 +647,11 @@ $router->group(['prefix' => 'api/v1'], function () use ($router) {
         });
 
         // Invoice Settings
-        $router->group(['prefix' => 'invoice'], function () use ($router) {
-            $router->get('/settings', 'Admin\\InvoiceSettingController@show');
-            $router->put('/settings', 'Admin\\InvoiceSettingController@update');
-        });
+    $router->group(['prefix' => 'invoice'], function () use ($router) {
+    $router->get('/settings', 'Admin\\InvoiceSettingController@show');
+    $router->put('/settings', 'Admin\\InvoiceSettingController@update');
+    $router->post('/logo', 'Admin\\InvoiceSettingController@uploadLogo'); // ← tambah ini
+});
 
         // Loyalty Settings
         $router->group(['prefix' => 'loyalty'], function () use ($router) {

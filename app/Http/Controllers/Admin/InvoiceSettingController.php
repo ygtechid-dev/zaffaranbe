@@ -86,4 +86,17 @@ class InvoiceSettingController extends Controller
 
         return response()->json(['message' => 'Invoice settings updated']);
     }
+
+    public function uploadLogo(Request $request)
+{
+    $this->validate($request, [
+        'logo' => 'required|image|mimes:jpeg,png,jpg,webp|max:1024',
+        'branch_id' => 'nullable',
+    ]);
+
+    $path = $request->file('logo')->store('invoice-logos', 'public');
+    $url = config('app.url') . '/storage/' . $path;
+
+    return response()->json(['logo_url' => $url]);
+}
 }
