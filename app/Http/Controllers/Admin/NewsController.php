@@ -88,6 +88,13 @@ class NewsController extends Controller
 
         $news = News::create($data);
 
+        if ($request->hasFile('image')) {
+    $path = $request->file('image')->store('news-images', 'public');
+    $news->update(['image_url' => config('app.url') . '/storage/' . $path]);
+}
+
+
+
         if (!$isGlobal && !empty($branchIds)) {
             $news->branches()->sync($branchIds);
         }
@@ -137,7 +144,10 @@ class NewsController extends Controller
         }
 
         $news->update($data);
-
+if ($request->hasFile('image')) {
+    $path = $request->file('image')->store('news-images', 'public');
+    $news->update(['image_url' => config('app.url') . '/storage/' . $path]);
+}
         if ($isGlobal) {
             $news->branches()->detach();
         } else if (!empty($branchIds)) {
