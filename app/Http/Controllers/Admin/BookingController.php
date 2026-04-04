@@ -1229,7 +1229,7 @@ class BookingController extends Controller
                 'end_time' => $newEnd,
                 'duration' => $duration,
                 'therapist_id' => $therapistId,
-                'notes' => $sourceBooking->notes . "\nRescheduled item: " . ($request->reason ?? 'Moved via Calendar'),
+                // 'notes' => $sourceBooking->notes . "\nRescheduled item: " . ($request->reason ?? 'Moved via Calendar'),
             ]);
 
             $item->update([
