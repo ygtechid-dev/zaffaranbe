@@ -237,6 +237,62 @@ class OpenApiController extends Controller
         }
     }
 
+
+    /**
+ * Initiate payment with gateway (QRIS/VA)
+ * POST /openapi/payments/initiate
+ */
+public function initiatePayment(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'payment_log_id' => 'required|integer|exists:payment_logs,id',
+        'amount'         => 'required|numeric|min:0',
+        'payment_method' => 'required|string',
+        'payment_type'   => 'nullable|string|in:full_payment,down_payment',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Validation failed',
+            'errors'  => $validator->errors()
+        ], 422);
+    }
+
+    try {
+        $paymentLog = PaymentLog::findOrFail($request->payment_log_id);
+
+        // Delegate ke PaymentController@initiate yang sama dengan FE
+        $paymentController = app(\App\Http\Controllers\PaymentController::class);
+        $paymentRequest = new Request([
+            'payment_log_id' => $request->payment_log_id,
+            'amount'         => $request->amount,
+            'payment_method' => $request->payment_method,
+            'payment_type'   => $request->payment_type ?? 'full_payment',
+        ]);
+
+        // Inject user ke request agar controller tidak error auth
+        $user = \App\Models\User::findOrFail($paymentLog->user_id);
+        $paymentRequest->setUserResolver(fn() => $user);
+
+        $result = $paymentController->initiate($paymentRequest);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Payment initiated successfully',
+            'data'    => $result->original
+        ], 200);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Failed to initiate payment',
+            'error'   => $e->getMessage()
+        ], 500);
+    }
+}
+
+
     /**
      * Create payment for a booking
      * POST /openapi/payments

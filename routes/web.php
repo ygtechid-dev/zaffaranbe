@@ -796,24 +796,13 @@ $router->group(['prefix' => 'api/v1'], function () use ($router) {
 | Credentials are configured in .env: OPENAPI_USERNAME and OPENAPI_PASSWORD
 */
 $router->group(['prefix' => 'openapi', 'middleware' => 'basicauth'], function () use ($router) {
-
-    // Register new customer
-    $router->post('/register', 'OpenApiController@register');
-
-    // Get available schedule/therapists
-    $router->get('/availability', 'OpenApiController@availability');
-
-    // Create new reservation
-    $router->post('/reservations', 'OpenApiController@createReservation');
-
-    // Reschedule existing booking
+    $router->post('/register',                    'OpenApiController@register');
+    $router->get('/availability',                 'OpenApiController@availability');
+    $router->post('/reservations',                'OpenApiController@createReservation');
     $router->put('/reservations/{id}/reschedule', 'OpenApiController@reschedule');
-
-    // Create payment
-    $router->post('/payments', 'OpenApiController@createPayment');
-
-    // Check payment status
-    $router->get('/payments/{id}/status', 'OpenApiController@checkPaymentStatus');
+    $router->post('/payments/initiate',           'OpenApiController@initiatePayment'); // ← TAMBAH INI, harus SEBELUM /payments
+    $router->post('/payments',                    'OpenApiController@createPayment');
+    $router->get('/payments/{id}/status',         'OpenApiController@checkPaymentStatus');
 });
 
 /*
