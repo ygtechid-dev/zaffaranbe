@@ -67,6 +67,7 @@ class CalendarController extends Controller
                 'user_id' => $booking->user_id,
                 'promoCode' => $booking->promo_code,
                 'discountAmount' => (float) $booking->discount_amount,
+                'is_rescheduled' => (bool) $booking->is_rescheduled,
                 'guestCount' => $booking->items->unique(function ($item) use ($booking) {
                     $name = $item->guest_name ?? $booking->guest_name ?? 'Guest';
                     $phone = $item->guest_phone ?? $booking->guest_phone ?? '';
@@ -239,59 +240,61 @@ class CalendarController extends Controller
         return $colors[$status] ?? '#6b7280';
     }
 
-    public function getSettings(Request $request)
-    {
-        $branchId = $request->input('branch_id');
-        $settings = \App\Models\CalendarSettings::where('branch_id', $branchId)->first();
+   public function getSettings(Request $request)
+{
+    $branchId = $request->input('branch_id');
+    $settings = \App\Models\CalendarSettings::where('branch_id', $branchId)->first();
 
-        if (!$settings) {
-            // Default settings
-            return response()->json([
-                'start_hour' => 9,
-                'end_hour' => 21,
-                'slot_duration' => 15,
-                'default_view' => 'day',
-                'agenda_color' => 'staff',
-                'week_start' => 'sunday',
-                'staff_order' => 'default'
-            ]);
-        }
-
-        return response()->json($settings);
-    }
-
-    public function updateSettings(Request $request)
-    {
-        $this->validate($request, [
-            'branch_id' => 'nullable|exists:branches,id',
-            'start_hour' => 'required|integer|min:0|max:23',
-            'end_hour' => 'required|integer|min:0|max:23|gt:start_hour',
-            'slot_duration' => 'required|integer|in:5,10,15,30,60', // Updated to match frontend options
-            'default_view' => 'required|string|in:day,week,month',
-            'agenda_color' => 'nullable|string',
-            'week_start' => 'nullable|string',
-            'staff_order' => 'nullable|string',
-            'allow_reschedule' => 'nullable|boolean',
-            'reschedule_deadline' => 'nullable|integer'
+    if (!$settings) {
+        return response()->json([
+            'start_hour' => 9,
+            'end_hour' => 21,
+            'slot_duration' => 15,
+            'reschedule_interval' => 15, // ← tambah ini
+            'default_view' => 'day',
+            'agenda_color' => 'staff',
+            'week_start' => 'sunday',
+            'staff_order' => 'default'
         ]);
-
-        $branchId = $request->input('branch_id');
-
-        $settings = \App\Models\CalendarSettings::updateOrCreate(
-            ['branch_id' => $branchId],
-            [
-                'start_hour' => $request->start_hour,
-                'end_hour' => $request->end_hour,
-                'slot_duration' => $request->slot_duration,
-                'default_view' => $request->default_view,
-                'agenda_color' => $request->agenda_color ?? 'staff',
-                'week_start' => $request->week_start ?? 'sunday',
-                'staff_order' => $request->staff_order ?? 'default',
-                'allow_reschedule' => $request->input('allow_reschedule', true),
-                'reschedule_deadline' => $request->input('reschedule_deadline', 24)
-            ]
-        );
-
-        return response()->json($settings);
     }
+
+    return response()->json($settings);
+}
+
+public function updateSettings(Request $request)
+{
+    $this->validate($request, [
+        'branch_id' => 'nullable|exists:branches,id',
+        'start_hour' => 'required|integer|min:0|max:23',
+        'end_hour' => 'required|integer|min:0|max:23|gt:start_hour',
+        'slot_duration' => 'required|integer|in:5,10,15,30,60',
+        'reschedule_interval' => 'nullable|integer|in:15,30,60', // ← tambah ini
+        'default_view' => 'required|string|in:day,week,month',
+        'agenda_color' => 'nullable|string',
+        'week_start' => 'nullable|string',
+        'staff_order' => 'nullable|string',
+        'allow_reschedule' => 'nullable|boolean',
+        'reschedule_deadline' => 'nullable|integer'
+    ]);
+
+    $branchId = $request->input('branch_id');
+
+    $settings = \App\Models\CalendarSettings::updateOrCreate(
+        ['branch_id' => $branchId],
+        [
+            'start_hour' => $request->start_hour,
+            'end_hour' => $request->end_hour,
+            'slot_duration' => $request->slot_duration,
+            'reschedule_interval' => $request->input('reschedule_interval', 15), // ← tambah ini
+            'default_view' => $request->default_view,
+            'agenda_color' => $request->agenda_color ?? 'staff',
+            'week_start' => $request->week_start ?? 'sunday',
+            'staff_order' => $request->staff_order ?? 'default',
+            'allow_reschedule' => $request->input('allow_reschedule', true),
+            'reschedule_deadline' => $request->input('reschedule_deadline', 24)
+        ]
+    );
+
+    return response()->json($settings);
+}
 }

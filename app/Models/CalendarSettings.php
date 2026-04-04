@@ -13,6 +13,7 @@ class CalendarSettings extends Model
         'start_hour',
         'end_hour',
         'slot_duration',
+         'reschedule_interval',
         'therapist_buffer_time',
         'default_view',
         'agenda_color',
@@ -28,6 +29,7 @@ class CalendarSettings extends Model
         'end_hour' => 'integer',
         'slot_duration' => 'integer',
         'therapist_buffer_time' => 'integer',
+          'reschedule_interval' => 'integer', 
         'allow_reschedule' => 'boolean',
         'reschedule_deadline' => 'integer'
     ];

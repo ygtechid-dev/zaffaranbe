@@ -1446,7 +1446,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             'therapist_id' => $item->therapist_id,
             'room_id' => $item->room_id,
             'service_price' => $item->price,
-            
+             'rescheduled_from_id' => $originalBooking->id, 
             'room_charge' => $item->room_charge,
             'total_price' => $item->price + $item->room_charge,
             'guest_count' => 1,

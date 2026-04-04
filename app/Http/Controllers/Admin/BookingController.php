@@ -1059,7 +1059,8 @@ class BookingController extends Controller
             'booking_date' => $request->booking_date,
             'start_time' => $startTime,
             'end_time' => $endTime,
-            'notes' => $booking->notes . ($request->reason ? "\nReschedule: " . $request->reason : ""),
+             'is_rescheduled' => true,
+            // 'notes' => $booking->notes . ($request->reason ? "\nReschedule: " . $request->reason : ""),
         ]);
 
         // Update Items sequantially
