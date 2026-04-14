@@ -193,6 +193,7 @@ $router->group(['prefix' => 'api/v1'], function () use ($router) {
         $router->group(['prefix' => 'feedbacks'], function () use ($router) {
             $router->get('/', 'FeedbackController@index');
             $router->post('/', 'FeedbackController@store');
+            $router->get('/booking/{bookingId}', 'FeedbackController@getByBooking'); 
         });
 
         // User Profile
