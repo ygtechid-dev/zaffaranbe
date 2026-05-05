@@ -71,12 +71,17 @@ class InvoiceSettingController extends Controller
         $branchId = $request->branch_id;
         $attrs = $branchId ? ['branch_id' => $branchId] : ['branch_id' => null];
 
-        // Ambil data existing — jangan overwrite logo_url kalau request tidak kirim
+        // Ambil data existing — preserve logo_url kalau request tidak kirim
         $existing = DB::table('invoice_settings')->where($attrs)->first();
         $existingLogoUrl = $existing->logo_url ?? '';
-
-        // Pakai logoUrl dari request kalau ada dan tidak kosong, fallback ke yang sudah ada di DB
         $logoUrl = $request->input('logoUrl') ?: $existingLogoUrl;
+
+        \Log::info('Invoice update request', [
+            'invoiceAddress' => $request->input('invoiceAddress'),
+            'invoicePhone' => $request->input('invoicePhone'),
+            'invoiceCity' => $request->input('invoiceCity'),
+            'all' => $request->all(),
+        ]);
 
         DB::table('invoice_settings')->updateOrInsert($attrs, [
             'logo_url' => $logoUrl,
