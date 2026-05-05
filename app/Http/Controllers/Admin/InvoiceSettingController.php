@@ -93,36 +93,37 @@ public function update(Request $request)
 
 public function uploadLogo(Request $request)
 {
-    \Log::info('Upload logo request', [
-        'branch_id' => $request->branch_id,
-        'has_file' => $request->hasFile('logo'),
-        'file_name' => $request->file('logo')?->getClientOriginalName(),
-    ]);
-
     $this->validate($request, [
         'logo' => 'required|image|mimes:jpeg,png,jpg,webp|max:1024',
         'branch_id' => 'nullable',
     ]);
 
-    $branchId = $request->branch_id;
+    $branchId = (int) $request->branch_id;
     $path = $request->file('logo')->store('invoice-logos', 'public');
     $url = config('app.url') . '/storage/' . $path;
 
-    \Log::info('Logo stored', [
-        'path' => $path,
-        'url' => $url,
+    $attrs = ['branch_id' => $branchId];
+    $exists = DB::table('invoice_settings')->where($attrs)->exists();
+
+    \Log::info('Upload logo', [
         'branch_id' => $branchId,
+        'url' => $url,
+        'exists' => $exists,
     ]);
 
-    $attrs = $branchId ? ['branch_id' => $branchId] : ['branch_id' => null];
-    
-    \Log::info('Updating DB with attrs', $attrs);
-    
-    DB::table('invoice_settings')->updateOrInsert($attrs, [
-        'logo_url' => $url,
-        'updated_at' => \Carbon\Carbon::now(),
-        'created_at' => \Carbon\Carbon::now(),
-    ]);
+    if ($exists) {
+        DB::table('invoice_settings')->where($attrs)->update([
+            'logo_url' => $url,
+            'updated_at' => \Carbon\Carbon::now(),
+        ]);
+    } else {
+        DB::table('invoice_settings')->insert([
+            'branch_id' => $branchId,
+            'logo_url' => $url,
+            'created_at' => \Carbon\Carbon::now(),
+            'updated_at' => \Carbon\Carbon::now(),
+        ]);
+    }
 
     return response()->json(['logo_url' => $url]);
 }
