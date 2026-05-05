@@ -93,6 +93,12 @@ public function update(Request $request)
 
 public function uploadLogo(Request $request)
 {
+    \Log::info('Upload logo request', [
+        'branch_id' => $request->branch_id,
+        'has_file' => $request->hasFile('logo'),
+        'file_name' => $request->file('logo')?->getClientOriginalName(),
+    ]);
+
     $this->validate($request, [
         'logo' => 'required|image|mimes:jpeg,png,jpg,webp|max:1024',
         'branch_id' => 'nullable',
@@ -102,8 +108,16 @@ public function uploadLogo(Request $request)
     $path = $request->file('logo')->store('invoice-logos', 'public');
     $url = config('app.url') . '/storage/' . $path;
 
-    // Langsung simpan logo_url ke DB setelah upload
+    \Log::info('Logo stored', [
+        'path' => $path,
+        'url' => $url,
+        'branch_id' => $branchId,
+    ]);
+
     $attrs = $branchId ? ['branch_id' => $branchId] : ['branch_id' => null];
+    
+    \Log::info('Updating DB with attrs', $attrs);
+    
     DB::table('invoice_settings')->updateOrInsert($attrs, [
         'logo_url' => $url,
         'updated_at' => \Carbon\Carbon::now(),
