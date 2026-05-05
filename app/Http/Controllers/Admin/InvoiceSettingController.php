@@ -20,6 +20,9 @@ class InvoiceSettingController extends Controller
                 'logoUrl' => '',
                 'invoiceTitle' => 'INVOICE',
                 'businessNameOverride' => '',
+                'invoiceAddress' => '',
+                'invoicePhone' => '',
+                'invoiceCity' => '',
                 'autoPrint' => true,
                 'showCustomerName' => true,
                 'showCustomerContact' => false,
@@ -42,6 +45,9 @@ class InvoiceSettingController extends Controller
             'logoUrl' => $settings->logo_url ?? '',
             'invoiceTitle' => $settings->invoice_title ?? 'INVOICE',
             'businessNameOverride' => $settings->business_name_override ?? '',
+            'invoiceAddress' => $settings->invoice_address ?? '',
+            'invoicePhone' => $settings->invoice_phone ?? '',
+            'invoiceCity' => $settings->invoice_city ?? '',
             'autoPrint' => (bool) $settings->auto_print,
             'showCustomerName' => (bool) $settings->show_customer_name,
             'showCustomerContact' => (bool) $settings->show_customer_contact,
@@ -65,7 +71,7 @@ class InvoiceSettingController extends Controller
         $branchId = $request->branch_id;
         $attrs = $branchId ? ['branch_id' => $branchId] : ['branch_id' => null];
 
-        // Ambil logo_url yang sudah ada di DB — jangan overwrite kalau request tidak kirim logoUrl
+        // Ambil data existing — jangan overwrite logo_url kalau request tidak kirim
         $existing = DB::table('invoice_settings')->where($attrs)->first();
         $existingLogoUrl = $existing->logo_url ?? '';
 
@@ -76,6 +82,9 @@ class InvoiceSettingController extends Controller
             'logo_url' => $logoUrl,
             'invoice_title' => $request->input('invoiceTitle', 'INVOICE'),
             'business_name_override' => $request->input('businessNameOverride', ''),
+            'invoice_address' => $request->input('invoiceAddress', ''),
+            'invoice_phone' => $request->input('invoicePhone', ''),
+            'invoice_city' => $request->input('invoiceCity', ''),
             'auto_print' => $request->input('autoPrint', true),
             'show_customer_name' => $request->input('showCustomerName', true),
             'show_customer_contact' => $request->input('showCustomerContact', false),
