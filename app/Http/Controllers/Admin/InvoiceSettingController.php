@@ -111,12 +111,19 @@ public function uploadLogo(Request $request)
         'exists' => $exists,
     ]);
 
- if ($exists) {
+if ($exists) {
     $affected = DB::table('invoice_settings')->where($attrs)->update([
         'logo_url' => $url,
         'updated_at' => \Carbon\Carbon::now(),
     ]);
-    \Log::info('Update result', ['affected' => $affected]);
+    
+    // Langsung cek setelah update
+    $check = DB::table('invoice_settings')->where($attrs)->first();
+    \Log::info('After update check', [
+        'affected' => $affected,
+        'logo_url_in_db' => $check->logo_url,
+        'branch_id_in_db' => $check->branch_id,
+    ]);
 }
 else {
         DB::table('invoice_settings')->insert([
