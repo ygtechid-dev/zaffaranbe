@@ -29,34 +29,37 @@ class CustomerReportController extends Controller
         $query = User::where('role', 'customer');
         $this->applyFilters($query, $request, 'created_at');
 
-        // Optimasi: Eager load bookings untuk perhitungan manual jika diperlukan, atau andalkan withCount/Sum
-        // Untuk last appointment, kita perlu data booking.
         $customers = $query->with(['bookings.branch'])
             ->withCount(['bookings as appointments'])
             ->withCount(['bookings as no_shows' => function($q) {
                 $q->where('status', 'no_show');
             }])
             ->withSum(['bookings as total_sales' => function($q) {
-                $q->whereIn('status', ['completed', 'confirmed']); // Asumsi confirmed juga dihitung atau hanya completed
+                $q->whereIn('status', ['completed', 'confirmed']);
             }], 'total_price')
             ->latest()
             ->get()
             ->map(function($user) {
-                // Determine last booking manually from collection to ensure accuracy without complex subqueries
                 $lastBooking = $user->bookings->sortByDesc('start_time')->first();
 
                 return [
-                    'id' => $user->id,
-                    'customer' => $user->name,
-                    'blocked' => !$user->is_active ? 1 : 0,
-                    'appointments' => $user->appointments,
-                    'noShows' => $user->no_shows,
-                    'totalSales' => (float) ($user->total_sales ?? 0),
-                    'outstanding' => 0, // Belum ada logic invoice outstanding
-                    'gender' => $user->gender ?? '-',
-                    'added' => $user->created_at->format('d M Y'),
-                    'lastAppointment' => $lastBooking ? Carbon::parse($lastBooking->start_time)->format('d M Y H:i') : '-',
-                    'lastLocation' => ($lastBooking && $lastBooking->branch) ? $lastBooking->branch->name : '-',
+                    'id'              => $user->id,
+                    'customer'        => $user->name,
+                    'phone'           => $user->phone ?? '-',   // ← tambah
+                    'email'           => $user->email ?? '-',   // ← tambah
+                    'blocked'         => !$user->is_active ? 1 : 0,
+                    'appointments'    => $user->appointments,
+                    'noShows'         => $user->no_shows,
+                    'totalSales'      => (float) ($user->total_sales ?? 0),
+                    'outstanding'     => 0,
+                    'gender'          => $user->gender ?? '-',
+                    'added'           => $user->created_at->format('d M Y'),
+                    'lastAppointment' => $lastBooking
+                        ? Carbon::parse($lastBooking->start_time)->format('d M Y H:i')
+                        : '-',
+                    'lastLocation'    => ($lastBooking && $lastBooking->branch)
+                        ? $lastBooking->branch->name
+                        : '-',
                 ];
             });
 
@@ -66,13 +69,12 @@ class CustomerReportController extends Controller
     public function retensi(Request $request)
     {
         $branchId = $request->input('branch_id');
-        $staffId = $request->input('staff_id'); // Usually 'staff_id' from frontend
+        $staffId  = $request->input('staff_id');
         $dateFrom = $request->input('date_from');
-        $dateTo = $request->input('date_to');
+        $dateTo   = $request->input('date_to');
 
         $query = User::where('role', 'customer');
 
-        // Filter based on bookings matching criteria
         $query->whereHas('bookings', function($q) use ($branchId, $staffId, $dateFrom, $dateTo) {
             if ($branchId && $branchId !== 'all') {
                 $q->where('branch_id', $branchId);
@@ -89,31 +91,39 @@ class CustomerReportController extends Controller
         });
 
         $data = $query->with(['bookings' => function($q) use ($branchId, $staffId) {
-                // Ensure we only get relevant bookings for calculations if needed
-                // But for 'last agenda', we might want their absolute last or last in this branch
                 if ($branchId && $branchId !== 'all') {
                     $q->where('branch_id', $branchId);
                 }
             }, 'bookings.therapist'])
+            ->withCount(['bookings as total_appointments'])                      // ← tambah
+            ->withCount(['bookings as total_no_shows' => function($q) {         // ← tambah
+                $q->where('status', 'no_show');
+            }])
             ->get()
             ->map(function($user) {
-                 $bookings = $user->bookings->sortByDesc('booking_date');
-                 $lastBooking = $bookings->first();
-                 
-                 // Kalkulasi Total Sale (Lifetime or Branch specific depends on BR, let's keep it lifetime for total)
-                 $totalSale = $bookings->where('status', 'completed')->sum('total_price');
-                 
-                 return [
-                     'id' => $user->id,
-                     'name' => $user->name,
-                     'phone' => $user->phone,
-                     'email' => $user->email,
-                     'lastAgenda' => $lastBooking ? Carbon::parse($lastBooking->booking_date)->format('d M Y') : '-',
-                     'absentCount' => $lastBooking ? Carbon::now()->diffInDays(Carbon::parse($lastBooking->booking_date)) : 0,
-                     'staff' => ($lastBooking && $lastBooking->therapist) ? $lastBooking->therapist->name : '-',
-                     'lastSale' => $lastBooking ? (float) $lastBooking->total_price : 0,
-                     'totalSale' => (float) $totalSale
-                 ];
+                $bookings    = $user->bookings->sortByDesc('booking_date');
+                $lastBooking = $bookings->first();
+                $totalSale   = $bookings->where('status', 'completed')->sum('total_price');
+
+                return [
+                    'id'          => $user->id,
+                    'name'        => $user->name,
+                    'phone'       => $user->phone ?? '-',
+                    'email'       => $user->email ?? '-',
+                    'lastAgenda'  => $lastBooking
+                        ? Carbon::parse($lastBooking->booking_date)->format('d M Y')
+                        : '-',
+                    'absentCount' => $lastBooking
+                        ? Carbon::now()->diffInDays(Carbon::parse($lastBooking->booking_date))
+                        : 0,
+                    'staff'       => ($lastBooking && $lastBooking->therapist)
+                        ? $lastBooking->therapist->name
+                        : '-',
+                    'lastSale'    => $lastBooking ? (float) $lastBooking->total_price : 0,
+                    'totalSale'   => (float) $totalSale,
+                    'appointments' => $user->total_appointments ?? 0,           // ← tambah
+                    'noShows'      => $user->total_no_shows ?? 0,               // ← tambah
+                ];
             })
             ->values();
 
