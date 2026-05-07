@@ -956,7 +956,7 @@ class ReportController extends Controller
     }
 
 
-    public function cashFlow(Request $request)
+   public function cashFlow(Request $request)
     {
         $branchId = $request->input('branch_id');
         $dateFrom = $request->input('date_from', Carbon::now()->startOfMonth()->toDateString());
@@ -977,26 +977,30 @@ class ReportController extends Controller
             // Sales
             if ($t->total > 0 && $t->type !== 'refund') {
                 $flows->push([
-                    'id' => $t->id,
-                    'raw_id' => $t->id,
-                    'is_trx' => true,
-                    'judul' => 'PENJUALAN',
-                    'tanggal' => Carbon::parse($t->transaction_date)->setTimezone('Asia/Jakarta'),
-                    'tipe' => 'PENJUALAN VIA ' . strtoupper(str_replace('_', ' ', $t->payment_method)),
-                    'jumlah' => $t->total
+                    'id'         => $t->id,
+                    'raw_id'     => $t->id,
+                    'is_trx'     => true,
+                    'judul'      => 'PENJUALAN',
+                    'tanggal'    => Carbon::parse($t->transaction_date)->setTimezone('Asia/Jakarta'),
+                    'tipe'       => 'PENJUALAN VIA ' . strtoupper(str_replace('_', ' ', $t->payment_method)),
+                    'jumlah'     => $t->total,
+                    'keterangan' => $t->notes ?? null,
+                    'bukti_foto' => null,
                 ]);
             }
 
-            // If it's a refund
+            // Refund
             if ($t->type === 'refund') {
                 $flows->push([
-                    'id' => $t->id,
-                    'raw_id' => $t->id,
-                    'is_trx' => true,
-                    'judul' => 'PENGEMBALIAN DANA',
-                    'tanggal' => Carbon::parse($t->transaction_date)->setTimezone('Asia/Jakarta'),
-                    'tipe' => 'REFUND VIA ' . strtoupper(str_replace('_', ' ', $t->payment_method)),
-                    'jumlah' => -abs((float) $t->total)
+                    'id'         => $t->id,
+                    'raw_id'     => $t->id,
+                    'is_trx'     => true,
+                    'judul'      => 'PENGEMBALIAN DANA',
+                    'tanggal'    => Carbon::parse($t->transaction_date)->setTimezone('Asia/Jakarta'),
+                    'tipe'       => 'REFUND VIA ' . strtoupper(str_replace('_', ' ', $t->payment_method)),
+                    'jumlah'     => -abs((float) $t->total),
+                    'keterangan' => $t->notes ?? null,
+                    'bukti_foto' => null,
                 ]);
             }
         }
@@ -1013,17 +1017,19 @@ class ReportController extends Controller
         foreach ($shifts as $s) {
             $isPositive = $s->variance > 0;
             $flows->push([
-                'id' => $s->id,
-                'raw_id' => $s->id,
-                'is_trx' => false,
-                'judul' => $isPositive ? 'Kelebihan Kas (Over)' : 'Kekurangan Kas (Short)',
-                'tanggal' => Carbon::parse($s->clock_out ?? $s->clock_in)->setTimezone('Asia/Jakarta'),
-                'tipe' => $isPositive ? 'CASH IN (Kasir Manual)' : 'CASH OUT (Kasir Manual)',
-                'jumlah' => $s->variance
+                'id'         => $s->id,
+                'raw_id'     => $s->id,
+                'is_trx'     => false,
+                'judul'      => $isPositive ? 'Kelebihan Kas (Over)' : 'Kekurangan Kas (Short)',
+                'tanggal'    => Carbon::parse($s->clock_out ?? $s->clock_in)->setTimezone('Asia/Jakarta'),
+                'tipe'       => $isPositive ? 'CASH IN (Kasir Manual)' : 'CASH OUT (Kasir Manual)',
+                'jumlah'     => $s->variance,
+                'keterangan' => $s->notes ?? null,
+                'bukti_foto' => null,
             ]);
         }
 
-        // 3. Petty Cash (Expenses)
+        // 3. Petty Cash (Expenses) — tambah keterangan & bukti_foto
         $expenseQuery = \App\Models\Expense::with('category');
         if ($branchId && $branchId !== 'all') {
             $expenseQuery->where('branch_id', $branchId);
@@ -1033,45 +1039,54 @@ class ReportController extends Controller
             ->get();
 
         foreach ($expenses as $e) {
+            // Kolom foto di tabel expenses = receipt_image
+            $fotoUrl = $e->receipt_image
+                ? asset('storage/' . $e->receipt_image)
+                : null;
+
             $flows->push([
-                'id' => 'EXP-' . $e->id,
-                'raw_id' => $e->id,
-                'is_trx' => false,
-                'judul' => strtoupper($e->description ?? 'PETTY CASH'),
-                'tanggal' => Carbon::parse($e->created_at)->setTimezone('Asia/Jakarta'),
-                'tipe' => 'PETTY CASH' . ($e->category ? ' - ' . strtoupper($e->category->name) : ''),
-                'jumlah' => -abs((float)$e->amount)
+                'id'         => 'EXP-' . $e->id,
+                'raw_id'     => $e->id,
+                'is_trx'     => false,
+                'judul'      => strtoupper($e->description ?? 'PETTY CASH'),
+                'tanggal'    => Carbon::parse($e->created_at)->setTimezone('Asia/Jakarta'),
+                'tipe'       => 'PETTY CASH' . ($e->category ? ' - ' . strtoupper($e->category->name) : ''),
+                'jumlah'     => -abs((float) $e->amount),
+                'keterangan' => $e->description ?? $e->notes ?? null,  // ← ambil dari expenses
+                'bukti_foto' => $fotoUrl,                               // ← ambil dari expenses
             ]);
         }
 
         // Sort by date DESC
         $sortedFlows = $flows->sortByDesc('tanggal')->values();
 
-        // Format for response
+        // Format for response — sekarang include keterangan & bukti_foto
         $formatted = $sortedFlows->map(function ($item, $index) {
             return [
-                'id' => $index + 1,
-                'judul' => $item['judul'],
-                'tanggal' => $item['tanggal']->format('d M Y, H:i'),
-                'tipe' => $item['tipe'],
-                'jumlah' => $item['jumlah']
+                'id'         => $index + 1,
+                'judul'      => $item['judul'],
+                'tanggal'    => $item['tanggal']->format('d M Y, H:i'),
+                'tipe'       => $item['tipe'],
+                'jumlah'     => $item['jumlah'],
+                'keterangan' => $item['keterangan'] ?? null,
+                'bukti_foto' => $item['bukti_foto'] ?? null,
             ];
         });
 
         // Summary
         $summary = [
-            'masuk' => $flows->where('jumlah', '>', 0)->sum('jumlah'),
-            'keluar' => $flows->where('jumlah', '<', 0)->sum('jumlah'),
-            'penjualan' => $flows->filter(function ($f) {
+            'masuk'       => $flows->where('jumlah', '>', 0)->sum('jumlah'),
+            'keluar'      => $flows->where('jumlah', '<', 0)->sum('jumlah'),
+            'penjualan'   => $flows->filter(function ($f) {
                 return str_starts_with($f['tipe'], 'PENJUALAN');
             })->sum('jumlah'),
-            'keseluruhan' => $flows->sum('jumlah')
+            'keseluruhan' => $flows->sum('jumlah'),
         ];
 
         return response()->json([
-            'period' => ['from' => $dateFrom, 'to' => $dateTo],
-            'flows' => $formatted,
-            'summary' => $summary
+            'period'  => ['from' => $dateFrom, 'to' => $dateTo],
+            'flows'   => $formatted,
+            'summary' => $summary,
         ]);
     }
 
