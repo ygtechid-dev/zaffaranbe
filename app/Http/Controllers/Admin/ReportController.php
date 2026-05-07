@@ -956,7 +956,7 @@ class ReportController extends Controller
     }
 
 
-   public function cashFlow(Request $request)
+ public function cashFlow(Request $request)
     {
         $branchId = $request->input('branch_id');
         $dateFrom = $request->input('date_from', Carbon::now()->startOfMonth()->toDateString());
@@ -1041,7 +1041,7 @@ class ReportController extends Controller
         foreach ($expenses as $e) {
             // Kolom foto di tabel expenses = receipt_image
             $fotoUrl = $e->receipt_image
-                ? asset('storage/' . $e->receipt_image)
+                ? \Storage::url($e->receipt_image)
                 : null;
 
             $flows->push([
