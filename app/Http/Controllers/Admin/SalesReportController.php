@@ -96,7 +96,7 @@ class SalesReportController extends Controller
                 'id' => $item->id,
                 'receiptNo' => strtoupper(substr(md5($item->transaction->id . 'rcp'), 0, 12)),
                 'invoiceNo' => $item->transaction->transaction_ref ?? ('INV-' . $item->transaction->id),
-                'source' => $item->transaction->booking ? (in_array($item->transaction->payment_method, ['virtual_account', 'transfer']) ? 'ONLINE' : 'WALK-IN') : 'POS',
+'source' => $item->transaction->booking ? ($item->transaction->booking->user_id ? 'ONLINE' : 'WALK-IN') : 'POS',
                 'type' => ucfirst($item->type),
                 'customer' => $customerName,
                 'name' => $itemName,
