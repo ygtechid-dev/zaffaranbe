@@ -322,19 +322,20 @@ class BookingController extends Controller
                             }
                         }
 
-                        foreach ($itemsToProcess as $item) {
-                            if (!$item['start_time'] || !$item['end_time'])
-                                continue;
+                     foreach ($itemsToProcess as $item) {
+    if (!$item['start_time'] || !$item['end_time'])
+        continue;
 
- $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
-$bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
-$lastBlockedSlot = $bEnd->copy()->subMinutes($slotInterval);
+    $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
+    $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
+    // Blok sampai bEnd - therapistBufferTime (misal 15:00 - 15 = 14:45)
+    $lastBlockedSlot = $bEnd->copy()->subMinutes($therapistBufferTime);
 
-if ($slotStart->gte($bStart) && $slotStart->lte($lastBlockedSlot)) {
-    $therapistBusy = true;
-    break 2;
+    if ($slotStart->gte($bStart) && $slotStart->lte($lastBlockedSlot)) {
+        $therapistBusy = true;
+        break 2;
+    }
 }
-                        }
                     }
 
                     // Determine availability and reason if not available
