@@ -328,13 +328,8 @@ class BookingController extends Controller
 
                             $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
                             // Add buffer time to end time for therapist rest period
-                            $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time'])->addMinutes($therapistBufferTime);
-
-                            // Check overlap (including buffer period)
-                            // A conflict exists if there is less than {therapistBufferTime} minutes between any two bookings
-                            // Formula: N_start < E_end + Buffer AND N_end + Buffer > E_start
-                            // if ($slotStart->lt($bEnd) && $slotEnd->copy()->addMinutes($therapistBufferTime)->gt($bStart)) {
-                           if ($slotStart->lt($bEnd) && $slotEnd->gt($bStart)) {
+                         $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']); // hapus addMinutes
+if ($slotStart->lt($bEnd) && $slotEnd->addMinutes($therapistBufferTime)->gt($bStart)) {
                             $therapistBusy = true;
                                 break 2;
                             }
