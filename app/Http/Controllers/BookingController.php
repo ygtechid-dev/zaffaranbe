@@ -326,13 +326,13 @@ class BookingController extends Controller
                             if (!$item['start_time'] || !$item['end_time'])
                                 continue;
 
-                            $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
-                            // Add buffer time to end time for therapist rest period
-                         $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']); // hapus addMinutes
-if ($slotStart->lt($bEnd) && $slotEnd->addMinutes($therapistBufferTime)->gt($bStart)) {
-                            $therapistBusy = true;
-                                break 2;
-                            }
+                        $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
+$bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
+
+if ($slotStart->gte($bStart) && $slotStart->lt($bEnd)) {
+    $therapistBusy = true;
+    break 2;
+}
                         }
                     }
 
