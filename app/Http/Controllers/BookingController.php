@@ -326,15 +326,13 @@ class BookingController extends Controller
     if (!$item['start_time'] || !$item['end_time'])
         continue;
 
-    $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
-    $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
-    // Blok sampai bEnd - therapistBufferTime (misal 15:00 - 15 = 14:45)
-    $lastBlockedSlot = $bEnd->copy()->subMinutes($therapistBufferTime);
+  $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
+$bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
 
-    if ($slotStart->gte($bStart) && $slotStart->lte($lastBlockedSlot)) {
-        $therapistBusy = true;
-        break 2;
-    }
+if ($slotStart->gte($bStart) && $slotStart->lt($bEnd)) {
+    $therapistBusy = true;
+    break 2;
+}
 }
                     }
 
