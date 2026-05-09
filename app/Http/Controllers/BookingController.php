@@ -329,6 +329,18 @@ class BookingController extends Controller
   $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
 $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
 
+
+\Log::info('SLOT DEBUG', [
+    'slotStart' => $slotStart->format('H:i'),
+    'bStart' => $bStart->format('H:i'),
+    'bEnd' => $bEnd->format('H:i'),
+    'gte_bStart' => $slotStart->gte($bStart),
+    'lt_bEnd' => $slotStart->lt($bEnd),
+    'busy' => $slotStart->gte($bStart) && $slotStart->lt($bEnd),
+]);
+
+
+
 if ($slotStart->gte($bStart) && $slotStart->lt($bEnd)) {
     $therapistBusy = true;
     break 2;
