@@ -908,12 +908,31 @@ class PaymentService
                             }
 
                             if ($therapist->email) {
-                                try {
-                                    $this->emailService->sendStaffBookingNotification($therapist->email, $mockBooking);
-                                } catch (\Exception $e) {
-                                    Log::error("Failed to notify staff via Email for item $index: " . $e->getMessage());
-                                }
-                            }
+    try {
+        $this->emailService->sendStaffBookingNotification($therapist->email, $mockBooking);
+    } catch (\Exception $e) {
+        Log::error("Failed to notify staff via Email for item $index: " . $e->getMessage());
+    }
+}
+
+// ✅ TAMBAH: Notify guest phone
+$guestPhone = $item['guest_phone'] ?? null;
+if ($guestPhone) {
+    try {
+        $this->whatsappService->sendBookingSuccess($guestPhone, [
+            'customer_name' => $item['guest_name'] ?? 'Tamu',
+            'branch_name'   => $booking->branch->name ?? 'Naqupos Spa',
+            'branch_id'     => $booking->branch_id,
+            'date'          => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
+            'time'          => substr($item['start_time'], 0, 5) . ' WIB',
+            'service'       => $item['service_name'] ?? ($booking->service->name ?? 'Treatment'),
+            'location'      => $booking->branch->address ?? ($booking->branch->name ?? ''),
+        ]);
+    } catch (\Exception $e) {
+        Log::error("Failed to notify guest phone for item $index: " . $e->getMessage());
+    }
+}
+
                         }
                     }
 

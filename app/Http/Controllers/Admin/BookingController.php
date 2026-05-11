@@ -1157,192 +1157,163 @@ class BookingController extends Controller
         ]);
     }
 
-    public function rescheduleItem(Request $request, $id, $itemId)
-    {
-        $validator = Validator::make($request->all(), [
-            'booking_date' => 'required|date',
-            'start_time' => 'required|date_format:H:i',
-            'therapist_id' => 'nullable|exists:therapists,id',
-            'reason' => 'nullable|string',
-        ]);
+   public function rescheduleItem(Request $request, $id, $itemId)
+{
+    $validator = Validator::make($request->all(), [
+        'booking_date' => 'required|date',
+        'start_time' => 'required|date_format:H:i',
+        'therapist_id' => 'nullable|exists:therapists,id',
+        'reason' => 'nullable|string',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $item = \App\Models\BookingItem::where('booking_id', $id)->where('id', $itemId)->first();
-
-        if (!$item) {
-            // Check legacy fallback
-            if ($id == $itemId) {
-                return $this->update($request, $id); // Re-use update logic for single booking
-            }
-            abort(404, "Booking item not found to reschedule");
-        }
-
-        $sourceBooking = $item->booking;
-
-        // Calculate new times
-        $newDate = $request->booking_date;
-        $newStart = $request->start_time;
-        $duration = $item->duration;
-        $newEnd = date('H:i', strtotime($newStart) + ($duration * 60));
-
-        // Use new therapist if provided, otherwise keep existing
-        $therapistId = $request->input('therapist_id', $item->therapist_id);
-
-        // Check Availability for this specific item (therapist)
-        if ($therapistId) {
-            $conflict = Booking::where('therapist_id', $therapistId)
-                ->where('booking_date', $newDate)
-                ->whereNotIn('status', ['cancelled', 'awaiting_payment']) // Exclude cancelled
-                ->where('id', '!=', $sourceBooking->id) // Don't conflict with its own original booking just in case
-                ->where(function ($q) use ($newStart, $newEnd) {
-                    $q->where(function ($sub) use ($newStart, $newEnd) {
-                        $sub->where('start_time', '>=', $newStart)
-                            ->where('start_time', '<', $newEnd);
-                    })
-                        ->orWhere(function ($sub) use ($newStart, $newEnd) {
-                            $sub->where('end_time', '>', $newStart)
-                                ->where('end_time', '<=', $newEnd);
-                        })
-                        ->orWhere(function ($sub) use ($newStart, $newEnd) {
-                            $sub->where('start_time', '<', $newStart)
-                                ->where('end_time', '>', $newEnd);
-                        });
-                })
-                ->exists();
-
-            if ($conflict) {
-                return response()->json(['errors' => ['time' => ['Therapist is not available at this time.']]], 422);
-            }
-        }
-
-        // CHECK IF IT'S THE ONLY ACTIVE ITEM IN THE BOOKING
-        $remainingItemsCount = $sourceBooking->items()->where('status', 'active')->count();
-
-        if ($remainingItemsCount === 1) {
-            // ONLY ONE ITEM - Just update the existing booking
-            $sourceBooking->update([
-                'booking_date' => $newDate,
-                'start_time' => $newStart,
-                'end_time' => $newEnd,
-                'duration' => $duration,
-                'therapist_id' => $therapistId,
-                 'is_rescheduled' => true
-                // 'notes' => $sourceBooking->notes . "\nRescheduled item: " . ($request->reason ?? 'Moved via Calendar'),
-            ]);
-
-            $item->update([
-                'therapist_id' => $therapistId,
-                'start_time' => $newStart,
-                'end_time' => $newEnd
-            ]);
-
-            // Notify Staff of Reschedule
-            if ($sourceBooking->therapist) {
-                if ($sourceBooking->therapist->phone) {
-                    $this->whatsappService->sendStaffRescheduleNotification($sourceBooking->therapist->phone, $sourceBooking);
-                }
-                if ($sourceBooking->therapist->email) {
-                    $this->emailService->sendStaffRescheduleNotification($sourceBooking->therapist->email, $sourceBooking);
-                }
-            }
-
-            return response()->json([
-                'message' => 'Booking rescheduled successfully',
-                'booking' => $sourceBooking->fresh(['items'])
-            ]);
-        }
-
-        // MULTIPLE ITEMS - Split into new booking (Existing logic)
-        // Use a derivative of the original ref to allow grouping in frontend
-        $baseRef = $sourceBooking->booking_ref;
-        // If it already has a suffix like -1, strip it or just add another
-        $newRef = $baseRef . '-' . rand(1, 99);
-
-        // Ensure uniqueness for newRef (rare conflict)
-        while (\App\Models\Booking::where('booking_ref', $newRef)->exists()) {
-            $newRef = $baseRef . '-' . rand(1, 99);
-        }
-
-        $newBooking = Booking::create([
-            'branch_id' => $sourceBooking->branch_id,
-            'booking_ref' => $newRef,
-            'user_id' => $sourceBooking->user_id,
-            'guest_name' => $item->guest_name ?: $sourceBooking->guest_name,
-            'guest_phone' => $item->guest_phone ?: $sourceBooking->guest_phone,
-            'booking_date' => $newDate,
-            'start_time' => $newStart,
-            'end_time' => $newEnd,
-            'duration' => $duration,
-            'service_id' => $item->service_id,
-            'therapist_id' => $therapistId, // Updated therapist
-            'room_id' => $item->room_id,
-            'service_price' => $item->price,
-            'room_charge' => $item->room_charge,
-            'total_price' => $item->price + $item->room_charge,
-            'guest_count' => 1,
-            'status' => $sourceBooking->status, // Inherit status
-            'payment_status' => $sourceBooking->payment_status, // Inherit payment status
-            'is_rescheduled' => true, 
-            'notes' => "Rescheduled from {$sourceBooking->booking_ref}. " . ($request->reason ?? ''),
-        ]);
-
-        // Move Item to New Booking
-        $item->update([
-            'booking_id' => $newBooking->id,
-            'therapist_id' => $therapistId, // Updated therapist
-            'start_time' => $newStart,
-            'end_time' => $newEnd
-        ]);
-
-        $oldTotalPrice = $sourceBooking->total_price;
-        $oldItems = $sourceBooking->items->toArray();
-
-        // Recalculate OLD Booking
-        $this->recalculateBooking($sourceBooking);
-
-        // Log Agenda Change (Move Item to New Booking)
-        $newTotalPrice = $sourceBooking->total_price;
-        $priceDiff = $newTotalPrice - $oldTotalPrice;
-
-        BookingAgendaLog::create([
-            'booking_id' => $sourceBooking->id,
-            'booking_item_id' => $item->id,
-            'action' => 'reschedule_item_move',
-            'old_data' => [
-                'items' => $oldItems,
-                'total_price' => $oldTotalPrice
-            ],
-            'new_data' => [
-                'moved_item_id' => $item->id,
-                'new_booking_id' => $newBooking->id,
-                'total_price' => $newTotalPrice
-            ],
-            'price_difference' => $priceDiff,
-            'changed_by' => Auth::id(),
-            'notes' => 'Pemindahan item ke booking baru oleh admin: ' . $newBooking->booking_ref
-        ]);
-
-        // Notify Staff of New Rescheduled Booking
-        if ($newBooking->therapist) {
-            if ($newBooking->therapist->phone) {
-                $this->whatsappService->sendStaffBookingNotification($newBooking->therapist->phone, $newBooking);
-            }
-            if ($newBooking->therapist->email) {
-                $this->emailService->sendStaffBookingNotification($newBooking->therapist->email, $newBooking);
-            }
-        }
-
-        AuditLog::log('update', 'Reservasi', "Split item from REF: {$sourceBooking->booking_ref} to new Booking REF: {$newBooking->booking_ref} (Reschedule)");
-
-        return response()->json([
-            'message' => 'Item rescheduled to new booking successfully',
-            'new_booking' => $newBooking,
-            'old_booking' => $sourceBooking->fresh()
-        ]);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
+
+    $item = \App\Models\BookingItem::where('booking_id', $id)
+        ->where('id', $itemId)
+        ->first();
+
+    if (!$item) {
+        if ($id == $itemId) {
+            return $this->update($request, $id);
+        }
+        abort(404, "Booking item not found to reschedule");
+    }
+
+    $sourceBooking = $item->booking;
+
+    $newDate   = $request->booking_date;
+    $newStart  = $request->start_time;
+    $duration  = $item->duration;
+    $newEnd    = date('H:i', strtotime($newStart) + ($duration * 60));
+    $therapistId = $request->input('therapist_id', $item->therapist_id);
+
+    // Conflict check — exclude source booking itself
+    if ($therapistId) {
+        $conflict = Booking::where('therapist_id', $therapistId)
+            ->where('booking_date', $newDate)
+            ->whereNotIn('status', ['cancelled', 'awaiting_payment'])
+            ->where('id', '!=', $sourceBooking->id)
+            ->where(function ($q) use ($newStart, $newEnd) {
+                $q->where(function ($sub) use ($newStart, $newEnd) {
+                    $sub->where('start_time', '>=', $newStart)
+                        ->where('start_time', '<', $newEnd);
+                })->orWhere(function ($sub) use ($newStart, $newEnd) {
+                    $sub->where('end_time', '>', $newStart)
+                        ->where('end_time', '<=', $newEnd);
+                })->orWhere(function ($sub) use ($newStart, $newEnd) {
+                    $sub->where('start_time', '<', $newStart)
+                        ->where('end_time', '>', $newEnd);
+                });
+            })
+            ->exists();
+
+        if ($conflict) {
+            return response()->json([
+                'errors' => ['time' => ['Terapis tidak tersedia pada waktu tersebut.']]
+            ], 422);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // ALWAYS update in-place — never split into a new booking.
+    // This keeps all items in 1 nota for settlement at POS.
+    // ---------------------------------------------------------------
+
+    $oldItems      = $sourceBooking->items->toArray();
+    $oldTotalPrice = $sourceBooking->total_price;
+
+    // Update the specific item
+    $item->update([
+        'therapist_id' => $therapistId,
+        'start_time'   => $newStart,
+        'end_time'     => $newEnd,
+        // booking_date per-item tidak ada di schema, 
+        // tapi kalau ada kolom booking_date di booking_items, uncomment:
+        // 'booking_date' => $newDate,
+    ]);
+
+    // Recalculate overall booking time span dari semua active items
+    $activeItems = $sourceBooking->items()->where('status', 'active')->get();
+
+    $overallStart = $activeItems->min('start_time');
+    $overallEnd   = $activeItems->max('end_time');
+
+    // Kalau tanggal berubah (pindah hari), update booking_date juga.
+    // Hanya berlaku kalau SEMUA item pindah ke tanggal baru,
+    // atau kalau item ini adalah satu-satunya yang active.
+    $shouldUpdateDate = $activeItems->count() === 1
+        || $activeItems->every(fn($i) => $i->id === $item->id);
+
+    $bookingUpdate = [
+        'start_time'   => $overallStart,
+        'end_time'     => $overallEnd,
+        'is_rescheduled' => true,
+    ];
+
+    if ($newDate !== $sourceBooking->booking_date->format('Y-m-d')) {
+        // Tanggal item berbeda dari booking — 
+        // update booking_date hanya kalau item ini satu-satunya active
+        if ($activeItems->count() === 1) {
+            $bookingUpdate['booking_date'] = $newDate;
+        }
+        // Kalau masih ada item lain di tanggal lama, biarkan booking_date tetap.
+        // Frontend sudah handle tampilan per-item start_time.
+    }
+
+    // Update therapist_id booking utama kalau item ini adalah item pertama
+    $firstItem = $activeItems->sortBy('start_time')->first();
+    if ($firstItem && $firstItem->id === $item->id) {
+        $bookingUpdate['therapist_id'] = $therapistId;
+    }
+
+    $sourceBooking->update($bookingUpdate);
+
+    // Audit log
+    BookingAgendaLog::create([
+        'booking_id'      => $sourceBooking->id,
+        'booking_item_id' => $item->id,
+        'action'          => 'reschedule_item',
+        'old_data'        => ['items' => $oldItems, 'total_price' => $oldTotalPrice],
+        'new_data'        => [
+            'item_id'    => $item->id,
+            'new_date'   => $newDate,
+            'new_start'  => $newStart,
+            'new_end'    => $newEnd,
+            'therapist'  => $therapistId,
+        ],
+        'price_difference' => 0,
+        'changed_by'      => Auth::id(),
+        'notes'           => 'Reschedule item in-place (no split): ' . ($request->reason ?? '-'),
+    ]);
+
+    // WA/Email notif ke terapis baru
+    $newTherapist = \App\Models\Therapist::find($therapistId);
+    if ($newTherapist) {
+        if ($newTherapist->phone) {
+            $this->whatsappService->sendStaffRescheduleNotification(
+                $newTherapist->phone, $sourceBooking
+            );
+        }
+        if ($newTherapist->email) {
+            $this->emailService->sendStaffRescheduleNotification(
+                $newTherapist->email, $sourceBooking
+            );
+        }
+    }
+
+    AuditLog::log(
+        'update',
+        'Reservasi Item',
+        "Rescheduled item {$itemId} in booking REF: {$sourceBooking->booking_ref} to {$newDate} {$newStart} (in-place, no split)"
+    );
+
+    return response()->json([
+        'message' => 'Item rescheduled successfully',
+        'booking' => $sourceBooking->fresh(['items']),
+    ]);
+}
 
     public function completeItem(Request $request, $id, $itemId)
     {
