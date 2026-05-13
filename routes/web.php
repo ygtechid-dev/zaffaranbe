@@ -149,6 +149,11 @@ $router->group(['prefix' => 'api/v1'], function () use ($router) {
     $router->get('branches', 'BranchController@index');
     $router->get('branches/{id}', 'BranchController@show');
 
+
+    // Public Settings (for customer app)
+$router->get('settings/public', 'PublicSettingsController@index');
+
+
     // Public cities & locations
     $router->get('cities', 'CityController@index');
     $router->get('provinces', 'LocationController@provinces');
