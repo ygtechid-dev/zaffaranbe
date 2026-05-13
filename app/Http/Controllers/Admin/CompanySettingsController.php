@@ -80,9 +80,13 @@ class CompanySettingsController extends Controller
             'voucher_expiration' => 'nullable|string',
             'rounding_enabled' => 'nullable|boolean',
             'rounding_mode' => 'nullable|string|in:up,down',
-            'rounding_amount' => 'nullable|integer|min:0',
+            'rounding_amount' => 'nullable|integer|min:0'
+            ,
             'is_tax_enabled' => 'nullable|boolean',
             'is_service_charge_enabled' => 'nullable|boolean',
+            'tnc_enabled' => 'nullable|boolean',
+'tnc_title'   => 'nullable|string|max:255',
+'tnc_content' => 'nullable|string',
         ]);
 
         $branchId = $request->input('branch_id');

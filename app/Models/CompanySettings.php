@@ -48,8 +48,12 @@ class CompanySettings extends Model
         'rounding_enabled',
         'rounding_mode',
         'rounding_amount',
+        
         'is_tax_enabled',
         'is_service_charge_enabled',
+        'tnc_enabled',
+'tnc_title',
+'tnc_content',
     ];
 
     protected $casts = [
