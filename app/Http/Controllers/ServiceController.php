@@ -452,4 +452,47 @@ class ServiceController extends Controller
 
         return response()->json(['error' => 'No image provided'], 400);
     }
+
+    public function getFeatured(Request $request)
+{
+    $query = \App\Models\Service::with(['serviceCategory', 'variants'])
+        ->where('is_featured', true)
+        ->where('is_active', true);
+
+    if ($request->has('branch_id')) {
+        $query->where(function($q) use ($request) {
+            $q->where('branch_id', $request->branch_id)
+              ->orWhereNull('branch_id');
+        });
+    }
+
+    return response()->json(
+        $query->orderBy('featured_order', 'asc')
+              ->orderBy('position', 'asc')
+              ->get()
+    );
+}
+
+public function updateFeatured(Request $request)
+{
+    $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+        'services'                => 'required|array',
+        'services.*.id'           => 'required|exists:services,id',
+        'services.*.is_featured'  => 'required|boolean',
+        'services.*.featured_order' => 'required|integer|min:0',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
+    }
+
+    foreach ($request->services as $item) {
+        \App\Models\Service::where('id', $item['id'])->update([
+            'is_featured'    => $item['is_featured'],
+            'featured_order' => $item['featured_order'],
+        ]);
+    }
+
+    return response()->json(['message' => 'Featured services updated successfully']);
+}
 }

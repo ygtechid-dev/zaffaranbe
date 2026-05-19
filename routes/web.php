@@ -396,6 +396,8 @@ $router->get('settings/public', 'PublicSettingsController@index');
             $router->get('/', 'ServiceController@index');
             $router->post('/', 'ServiceController@store');
             $router->post('/reorder', 'ServiceController@reorder');
+            $router->get('/featured', 'ServiceController@getFeatured');
+$router->post('/featured', 'ServiceController@updateFeatured');
             $router->get('/price-logs', 'ServiceController@allPriceLogs');
             $router->get('/{id}/price-logs', 'ServiceController@priceLogs');
 

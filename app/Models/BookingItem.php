@@ -26,7 +26,10 @@ class BookingItem extends Model
         'guest_age',
         'status', 
         'refund_amount', 
-        'cancellation_reason'
+        'cancellation_reason',
+         'status',
+    'refund_amount',
+    'cancellation_reason'
     ];
 
     protected $casts = [

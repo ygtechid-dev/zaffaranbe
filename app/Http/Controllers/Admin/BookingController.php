@@ -1414,145 +1414,213 @@ class BookingController extends Controller
         ]);
     }
 
-    public function refundItem(Request $request, $id, $itemId)
-    {
-        $validator = Validator::make($request->all(), [
-            'refund_amount' => 'required|numeric|min:0',
-            'refund_method' => 'required|string',
-            'reason' => 'nullable|string',
-        ]);
+  public function refundItem(Request $request, $id, $itemId)
+{
+    $validator = Validator::make($request->all(), [
+        'refund_amount' => 'required|numeric|min:1',
+        'refund_method' => 'required|in:cash,bank_transfer,wallet,qris',
+        'reason'        => 'nullable|string|max:500',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
+    }
+
+    // Cari item — fallback ke processRefund kalau legacy (itemId == bookingId)
+    $item = \App\Models\BookingItem::where('booking_id', $id)
+        ->where('id', $itemId)
+        ->first();
+
+    if (!$item) {
+        if ((string) $id === (string) $itemId) {
+            return $this->processRefund($request, $id);
         }
+        return response()->json(['error' => "Item tidak ditemukan (ID: {$itemId})"], 404);
+    }
 
-        $item = \App\Models\BookingItem::where('booking_id', $id)->where('id', $itemId)->first();
+    $booking = $item->booking;
 
-        if (!$item) {
-            if ($id == $itemId) {
-                return $this->processRefund($request, $id);
-            }
-            abort(404, "Booking item not found to refund");
-        }
+    if (!$booking) {
+        return response()->json(['error' => 'Booking tidak ditemukan'], 404);
+    }
 
-        $booking = $item->booking;
+    // Hanya boleh refund kalau sudah ada pembayaran
+    if (!in_array($booking->payment_status, ['paid', 'partial'])) {
+        return response()->json([
+            'error' => 'Refund hanya bisa dilakukan untuk booking yang sudah dibayar (paid/partial).'
+        ], 422);
+    }
 
-        $oldTotalPrice = $booking->total_price;
-        $oldItems = $booking->items->toArray();
+    // Hitung nilai item
+    $itemServicePrice = (float) ($item->price ?? $item->service_price ?? 0);
+    $itemRoomCharge   = (float) ($item->room_charge ?? 0);
+    $itemTotal        = $itemServicePrice + $itemRoomCharge;
 
-        // Update Item Status
-        $item->update([
-            'status' => 'refunded',
-            'refund_amount' => $request->refund_amount,
-            'cancellation_reason' => $request->reason ?? 'Refunded by admin'
-        ]);
+    // Kurangi yang sudah pernah direfund di item ini
+    $alreadyRefunded = (float) ($item->refund_amount ?? 0);
+    $maxRefund       = $itemTotal - $alreadyRefunded;
 
-        // Update main booking refund total
-        $booking->update([
-            'refund_amount' => ($booking->refund_amount ?? 0) + $request->refund_amount,
-        ]);
+    if ($maxRefund <= 0) {
+        return response()->json([
+            'error' => 'Item ini sudah pernah di-refund penuh.'
+        ], 422);
+    }
 
-        $this->recalculateBooking($booking);
+    $requestedAmount = (float) $request->refund_amount;
 
-        // Log Agenda Change (Refund)
-        $newTotalPrice = $booking->total_price;
-        $priceDiff = $newTotalPrice - $oldTotalPrice;
+    if ($requestedAmount > $maxRefund) {
+        return response()->json([
+            'error' => 'Nominal refund melebihi sisa nilai item. Maksimal: Rp ' . number_format($maxRefund, 0, ',', '.')
+        ], 422);
+    }
 
+    // Snapshot sebelum perubahan
+    $oldItems      = $booking->items->toArray();
+    $oldTotalPrice = (float) $booking->total_price;
+
+    // Update status item
+    $item->status              = 'refunded';
+    $item->refund_amount       = $alreadyRefunded + $requestedAmount;
+    $item->cancellation_reason = $request->reason ?? 'Refund oleh admin';
+    $item->save();
+
+    // Akumulasi refund_amount di booking utama
+    $booking->refund_amount = ((float) ($booking->refund_amount ?? 0)) + $requestedAmount;
+    $booking->save();
+
+    // Recalculate booking
+    $this->recalculateBooking($booking);
+    $booking->refresh();
+
+    $newTotalPrice = (float) $booking->total_price;
+    $priceDiff     = $newTotalPrice - $oldTotalPrice;
+
+    // Log agenda
+    try {
         BookingAgendaLog::create([
-            'booking_id' => $booking->id,
-            'booking_item_id' => $item->id,
-            'action' => 'refund_item',
-            'old_data' => [
-                'items' => $oldItems,
-                'total_price' => $oldTotalPrice
+            'booking_id'       => $booking->id,
+            'booking_item_id'  => $item->id,
+            'action'           => 'refund_item',
+            'old_data'         => [
+                'items'       => $oldItems,
+                'total_price' => $oldTotalPrice,
             ],
-            'new_data' => [
+            'new_data'         => [
                 'refunded_item_id' => $item->id,
-                'refund_amount' => $request->refund_amount,
-                'total_price' => $newTotalPrice
+                'refund_amount'    => $requestedAmount,
+                'refund_method'    => $request->refund_method,
+                'total_price'      => $newTotalPrice,
             ],
             'price_difference' => $priceDiff,
-            'changed_by' => Auth::id(),
-            'notes' => 'Refund item layanan oleh admin'
+            'changed_by'       => Auth::id(),
+            'notes'            => 'Refund item: ' . ($request->reason ?? '-'),
         ]);
+    } catch (\Exception $e) {
+        \Log::warning("Gagal catat agenda log refund: " . $e->getMessage());
+    }
 
-        // Log transaction (Refund)
+    // Catat transaksi refund
+    try {
         \App\Models\Transaction::create([
-            'booking_id' => $booking->id,
-            'branch_id' => $booking->branch_id,
-            'type' => 'refund',
-            'total' => $request->refund_amount,
-            'payment_method' => $request->refund_method,
+            'booking_id'       => $booking->id,
+            'branch_id'        => $booking->branch_id,
+            'cashier_id'       => Auth::id(),
+            'type'             => 'refund',
+            'subtotal'         => 0,
+            'discount'         => 0,
+            'tax'              => 0,
+            'total'            => $requestedAmount,
+            'payment_method'   => $request->refund_method,
+            'cash_received'    => 0,
+            'change_amount'    => 0,
             'transaction_date' => Carbon::now(),
-            'notes' => "Item Refund (Item #{$itemId}) for Booking " . $booking->booking_ref . ". Reason: " . $request->reason
+            'notes'            => "Refund item #{$itemId} dari booking {$booking->booking_ref}. Alasan: " . ($request->reason ?? '-'),
         ]);
+    } catch (\Exception $e) {
+        \Log::warning("Gagal catat transaksi refund: " . $e->getMessage());
+    }
 
-        // Notify Customer
+    // Notif WA/Email — wrapped try/catch agar tidak block response
+    try {
         $customer = $booking->user;
-        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
-        $email = $customer ? $customer->email : null;
+        $phone    = $customer?->phone ?? $booking->guest_phone ?? null;
+        $email    = $customer?->email ?? null;
 
         if ($phone) {
-            $this->whatsappService->sendCustomerRefundNotification($phone, $booking, $request->refund_amount, 'processed');
+            $this->whatsappService->sendCustomerRefundNotification(
+                $phone, $booking, $requestedAmount, 'processed'
+            );
         }
         if ($email) {
-            $this->emailService->sendCustomerRefundNotification($email, $booking, $request->refund_amount, 'processed');
+            $this->emailService->sendCustomerRefundNotification(
+                $email, $booking, $requestedAmount, 'processed'
+            );
         }
-
-        AuditLog::log('update', 'Reservasi Item', "Refunded item {$itemId} from booking REF: {$booking->booking_ref} amount Rp " . number_format($request->refund_amount));
-
-        return response()->json([
-            'message' => 'Item refunded successfully',
-            'booking' => $booking->fresh(['items'])
-        ]);
+    } catch (\Exception $e) {
+        \Log::warning("Gagal kirim notif refund: " . $e->getMessage());
     }
 
+    AuditLog::log(
+        'update',
+        'Reservasi Item',
+        "Refund item {$itemId} dari booking REF: {$booking->booking_ref}, nominal Rp " . number_format($requestedAmount)
+    );
 
-    private function recalculateBooking(Booking $booking)
-    {
-        $remainingItems = $booking->items()->where('status', 'active')->get();
+    return response()->json([
+        'message'       => 'Refund berhasil diproses',
+        'refund_amount' => $requestedAmount,
+        'refund_method' => $request->refund_method,
+        'item'          => $item->fresh(),
+        'booking'       => $booking->fresh(['items', 'payments']),
+    ]);
+}
 
-        if ($remainingItems->isEmpty()) {
-            $booking->update(['status' => 'cancelled']);
-        } else {
-            $minStart = $remainingItems->min('start_time');
-            $maxEnd = $remainingItems->max('end_time');
-            $totalServicePrice = $remainingItems->sum('price');
-            $totalRoomCharge = $remainingItems->sum('room_charge'); 
-            $guestCount = $remainingItems->count();
-            $newTotalPrice = $totalServicePrice + $totalRoomCharge;
+private function recalculateBooking(Booking $booking)
+{
+    // Skip recalculate untuk blocked time
+    if ($booking->is_blocked) return;
 
-            // Calculate total paid from successful payments
-            $totalPaid = $booking->payments()->where('status', 'success')->sum('amount');
+    // Hanya hitung item yang masih active (bukan cancelled/refunded)
+    $remainingItems = $booking->items()
+        ->where('status', 'active')
+        ->get();
 
-            // Determine new payment status based on price change
-            $paymentStatus = 'unpaid';
-            if ($totalPaid >= $newTotalPrice && $newTotalPrice > 0) {
-                $paymentStatus = 'paid';
-            } elseif ($totalPaid > 0) {
-                $paymentStatus = 'partial';
-            }
-
-            $booking->update([
-                'start_time' => $minStart,
-                'end_time' => $maxEnd,
-                'service_price' => $totalServicePrice,
-                'room_charge' => $totalRoomCharge,
-                'total_price' => $newTotalPrice,
-                'guest_count' => $guestCount,
-                'payment_status' => $paymentStatus
-            ]);
-
-            // Detect overpayment (case where service changed to cheaper price after full payment)
-            if ($totalPaid > $newTotalPrice) {
-                // Optional: We could log this or update notes
-                $excess = $totalPaid - $newTotalPrice;
-                $booking->update([
-                    'notes' => $booking->notes . "\n[SISTEM] Terdeteksi kelebihan bayar: Rp " . number_format($excess) . " akibat penyesuaian harga layanan."
-                ]);
-            }
-        }
+    if ($remainingItems->isEmpty()) {
+        $booking->update(['status' => 'cancelled']);
+        return;
     }
+
+    $minStart          = $remainingItems->min('start_time');
+    $maxEnd            = $remainingItems->max('end_time');
+    $totalServicePrice = $remainingItems->sum('price');
+    $totalRoomCharge   = $remainingItems->sum('room_charge');
+    $guestCount        = $remainingItems->count();
+    $newTotalPrice     = $totalServicePrice + $totalRoomCharge;
+
+    $totalPaid = $booking->payments()
+        ->where('status', 'success')
+        ->sum('amount');
+
+    if ($newTotalPrice <= 0) {
+        $paymentStatus = 'paid';
+    } elseif ($totalPaid >= $newTotalPrice) {
+        $paymentStatus = 'paid';
+    } elseif ($totalPaid > 0) {
+        $paymentStatus = 'partial';
+    } else {
+        $paymentStatus = 'unpaid';
+    }
+
+    $booking->update([
+        'start_time'     => $minStart,
+        'end_time'       => $maxEnd,
+        'service_price'  => $totalServicePrice,
+        'room_charge'    => $totalRoomCharge,
+        'total_price'    => $newTotalPrice,
+        'guest_count'    => $guestCount,
+        'payment_status' => $paymentStatus,
+    ]);
+}
 
     public function agendaLogs($id)
     {
