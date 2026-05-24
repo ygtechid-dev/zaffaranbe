@@ -193,12 +193,21 @@ class ReportController extends Controller
         $salesData = $salesQuery->where(DB::raw('DATE(transaction_date)'), '>=', $dateFrom)
             ->where(DB::raw('DATE(transaction_date)'), '<=', $dateTo)
             ->select(
-                DB::raw('SUM(total) as penjualan_kotor'),
+          DB::raw('SUM(CASE WHEN type != "refund" THEN total ELSE 0 END) as penjualan_kotor'),
                 DB::raw('SUM(discount) as diskon'),
-                DB::raw('SUM(CASE WHEN type = "refund" THEN total ELSE 0 END) as pengembalian'), // Assuming 'refund' type exists or adjust logic
                 DB::raw('SUM(tax) as total_pajak'),
-                DB::raw('SUM(total) as total_penjualan') // Net sales basically
+            DB::raw('SUM(CASE WHEN type != "refund" THEN total ELSE 0 END) as total_penjualan')
             )->first();
+
+            $refundQuery = Booking::query();
+if ($branchId && $branchId !== 'all') {
+    $refundQuery->where('branch_id', $branchId);
+}
+$totalRefund = $refundQuery
+    ->where(DB::raw('DATE(updated_at)'), '>=', $dateFrom)
+    ->where(DB::raw('DATE(updated_at)'), '<=', $dateTo)
+    ->where('refund_amount', '>', 0)
+    ->sum('refund_amount');
 
         // 2. Payments Data
         $paymentsQuery = Transaction::query();
@@ -322,8 +331,9 @@ class ReportController extends Controller
                 'penjualanKotor' => ($salesData->penjualan_kotor ?? 0) + $totalPenggunaanVoucher,
                 'diskon' => $baseDiskon,
                 'diskonTotalPenjualan' => $totalDiskonGabungan,
-                'pengembalian' => $salesData->pengembalian ?? 0,
-                'penjualanBersih' => ($salesData->penjualan_kotor ?? 0) - ($salesData->diskon ?? 0) - $totalPenggunaanVoucher,
+               'pengembalian' => $totalRefund,
+          'penjualanBersih' => ($salesData->penjualan_kotor ?? 0) - ($salesData->diskon ?? 0) - $totalPenggunaanVoucher - $totalRefund,
+
                 'totalPajak' => $salesData->total_pajak ?? 0,
                 'totalPembulatan' => 0,
                 'penggunaanVoucher' => $totalPenggunaanVoucher,
@@ -422,7 +432,9 @@ class ReportController extends Controller
             foreach ($group as $trx) {
                 // Determine refunds if it exists
                 if ($trx->type === 'refund') {
-                    $refunds += $trx->total; // assuming refund value is tracked here
+                  $refunds = 0;
+$uniqueBookings = $group->pluck('booking')->filter()->unique('id');
+$refunds = $uniqueBookings->sum('refund_amount');
                 } else {
                     $voucherAmount = 0;
                     if ($trx->booking && $trx->booking->discount_amount) {
@@ -467,7 +479,8 @@ class ReportController extends Controller
         $summary = [
             'totalTransaksi' => $details->sum('totalTx'),
             'pendapatanKotor' => $details->sum('gross'),
-            'totalPengembalian' => $details->sum('refunds'),
+         'totalPengembalian' => $details->sum('refunds'),
+
             'penggunaanVoucher' => $details->sum('voucher'),
             'kembalian' => $details->sum('kembalian'),
             'totalPembayaranNet' => $details->sum('net')
@@ -859,10 +872,18 @@ class ReportController extends Controller
             ->where(DB::raw('DATE(transaction_date)'), '<=', $dateTo)
             ->get();
 
-        $onlineSales = $transactions->whereIn('payment_method', ['virtual_account', 'transfer'])->sum('subtotal');
-        $posSales = $transactions->whereNotIn('payment_method', ['virtual_account', 'transfer'])->sum('subtotal');
+      $onlineSales = $transactions->whereIn('payment_method', ['virtual_account', 'transfer'])->where('type', '!=', 'refund')->sum('subtotal');
+$posSales = $transactions->whereNotIn('payment_method', ['virtual_account', 'transfer'])->where('type', '!=', 'refund')->sum('subtotal');
         $totalTax = $transactions->sum('tax');
-        $totalRefund = $transactions->where('type', 'refund')->sum('total');
+      $refundQuery = Booking::query();
+if ($branchId && $branchId !== 'all') {
+    $refundQuery->where('branch_id', $branchId);
+}
+$totalRefund = $refundQuery
+    ->where(DB::raw('DATE(updated_at)'), '>=', $dateFrom)
+    ->where(DB::raw('DATE(updated_at)'), '<=', $dateTo)
+    ->where('refund_amount', '>', 0)
+    ->sum('refund_amount');
 
         $totalPendapatan = $onlineSales + $posSales;
 
@@ -928,7 +949,8 @@ class ReportController extends Controller
             ['name' => '- ONLINE', 'amount' => $onlineSales, 'indent' => 1],
             ['name' => '- POINT OF SALE', 'amount' => $posSales, 'indent' => 1],
             ['name' => '- Tax', 'amount' => $totalTax, 'indent' => 1],
-            ['name' => '- Refund', 'amount' => $totalRefund, 'indent' => 1], // Show as positive number, logic handles deduction
+           ['name' => '- Refund', 'amount' => $totalRefund, 'indent' => 1, 'isNegative' => true],
+
 
             ['name' => '2. Harga Pokok Penjualan', 'amount' => 0, 'bold' => true],
             ['name' => '- Total penjualan produk (Harga biaya)', 'amount' => 0, 'indent' => 1],

@@ -1631,4 +1631,17 @@ private function recalculateBooking(Booking $booking)
 
         return response()->json($logs);
     }
+
+     public function destroy($id)
+{
+    $booking = Booking::findOrFail($id);
+    
+    if (!$booking->is_blocked) {
+        return response()->json(['message' => 'Hanya blokir waktu yang dapat dihapus melalui endpoint ini'], 403);
+    }
+    
+    $booking->delete();
+    
+    return response()->json(['message' => 'Blokir waktu berhasil dihapus']);
+}
 }

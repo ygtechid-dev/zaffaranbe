@@ -1666,45 +1666,45 @@ class SalesReportController extends Controller
     /**
      * 23. Penjualan Refund - Refunded sales
      */
-    public function salesRefund(Request $request)
-    {
-        $branchId = $request->input('branch_id');
-        $dateFrom = $request->filled('date_from') ? Carbon::parse($request->input('date_from'))->startOfDay() : Carbon::now()->startOfMonth();
-        $dateTo = $request->filled('date_to') ? Carbon::parse($request->input('date_to'))->endOfDay() : Carbon::now()->endOfMonth();
+   public function salesRefund(Request $request)
+{
+    $branchId = $request->input('branch_id');
+    $dateFrom = $request->filled('date_from') ? Carbon::parse($request->input('date_from'))->startOfDay() : Carbon::now()->startOfMonth();
+    $dateTo = $request->filled('date_to') ? Carbon::parse($request->input('date_to'))->endOfDay() : Carbon::now()->endOfMonth();
 
-        $query = Booking::with(['user', 'branch', 'transaction', 'service', 'canceller'])
-            ->where('status', 'cancelled')
-            ->where('refund_amount', '>', 0)
-            ->whereBetween('cancelled_at', [$dateFrom, $dateTo]);
+    $query = Booking::with(['user', 'branch', 'transaction', 'service'])
+        ->where('refund_amount', '>', 0)
+        ->where(DB::raw('DATE(updated_at)'), '>=', $dateFrom->toDateString())
+        ->where(DB::raw('DATE(updated_at)'), '<=', $dateTo->toDateString());
 
-        if ($branchId) {
-            $query->where('branch_id', $branchId);
-        }
-
-        $refunds = $query->orderBy('cancelled_at', 'desc')->get();
-
-        $data = $refunds->map(function ($booking, $index) {
-            return [
-                'id' => $index + 1,
-                'invoiceNo' => $booking->transaction->transaction_ref ?? $booking->booking_ref,
-                'date' => Carbon::parse($booking->cancelled_at)->format('d M Y'),
-                'amount' => floatval($booking->refund_amount),
-                'costPrice' => floatval($booking->service->capital_price ?? 0),
-                'customer' => $booking->customer_name,
-                'location' => $booking->branch->name ?? '-',
-                'source' => $booking->transaction ? ($booking->transaction->type === 'booking' ? 'ONLINE' : 'POS') : 'ONLINE',
-                'changedOn' => Carbon::parse($booking->cancelled_at)->format('d M Y H:i'),
-                'changedBy' => $booking->canceller->name ?? 'Admin'
-            ];
-        });
-
-        return response()->json([
-            'period' => ['from' => $dateFrom, 'to' => $dateTo],
-            'data' => $data,
-            'total' => $data->count(),
-            'totalAmount' => round($data->sum('amount'), 2)
-        ]);
+    if ($branchId) {
+        $query->where('branch_id', $branchId);
     }
+
+    $refunds = $query->orderBy('updated_at', 'desc')->get();
+
+    $data = $refunds->map(function ($booking, $index) {
+        return [
+            'id'        => $index + 1,
+            'invoiceNo' => $booking->booking_ref ?? ('BK-' . $booking->id),
+            'date'      => Carbon::parse($booking->updated_at)->format('d M Y'),
+            'amount'    => floatval($booking->refund_amount),
+            'costPrice' => 0,
+            'customer'  => $booking->user?->name ?? $booking->guest_name ?? 'Guest',
+            'location'  => $booking->branch?->name ?? '-',
+            'source'    => $booking->transaction ? ($booking->transaction->type === 'booking' ? 'ONLINE' : 'POS') : 'POS',
+            'changedOn' => Carbon::parse($booking->updated_at)->format('d M Y H:i'),
+            'changedBy' => 'Admin',
+        ];
+    });
+
+    return response()->json([
+        'period'      => ['from' => $dateFrom, 'to' => $dateTo],
+        'data'        => $data,
+        'total'       => $data->count(),
+        'totalAmount' => round($data->sum('amount'), 2),
+    ]);
+}
 
     /**
      * 24. Penjualan Dibatalkan - Cancelled sales

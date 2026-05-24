@@ -324,6 +324,7 @@ $router->get('settings/public', 'PublicSettingsController@index');
             $router->put('/{id}/reschedule', 'Admin\\BookingController@reschedule');
             $router->put('/{id}/status', 'Admin\\BookingController@updateStatus');
             $router->post('/{id}/refund', 'Admin\\BookingController@processRefund');
+              $router->delete('/{id}', 'Admin\\BookingController@destroy'); 
 
             // Item Level Actions
             $router->post('/{id}/items/{itemId}/cancel', 'Admin\\BookingController@cancelItem');

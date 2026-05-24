@@ -701,7 +701,8 @@ $bEnd = Carbon::parse($item->end_time);
             }
 
             $duration = $service->duration;
-            $price = $service->price;
+    $price = $service->special_price ?: $service->price;
+
 
             if (isset($itemData['variant_id'])) {
                 $variant = ServiceVariant::find($itemData['variant_id']);
@@ -1615,4 +1616,17 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             ]);
         }
     }
+
+    public function destroy($id)
+{
+    $booking = Booking::findOrFail($id);
+    
+    if (!$booking->is_blocked) {
+        return response()->json(['message' => 'Hanya blokir waktu yang dapat dihapus melalui endpoint ini'], 403);
+    }
+    
+    $booking->delete();
+    
+    return response()->json(['message' => 'Blokir waktu berhasil dihapus']);
+}
 }

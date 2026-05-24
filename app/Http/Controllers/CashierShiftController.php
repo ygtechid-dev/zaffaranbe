@@ -192,6 +192,21 @@ $methodTotals = (clone $transactions)
         $shift->transaction_count = $count;
         $shift->method_breakdown = $methodBreakdown;
 
+        // Calculate total refund during this shift
+        $totalRefund = \DB::table('booking_items')
+            ->where('status', 'refunded')
+            ->where('refund_amount', '>', 0)
+            ->whereExists(function ($query) use ($shift) {
+                $query->select(\DB::raw(1))
+                    ->from('bookings')
+                    ->whereColumn('bookings.id', 'booking_items.booking_id')
+                    ->where('bookings.branch_id', $shift->branch_id);
+            })
+            ->whereBetween('booking_items.updated_at', [$shift->clock_in, \Carbon\Carbon::now()])
+            ->sum('refund_amount');
+
+        $shift->total_refund = (float) $totalRefund;
+
 
         return response()->json([
             'shift' => $shift,

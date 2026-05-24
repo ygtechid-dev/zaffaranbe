@@ -31,11 +31,12 @@ class AuthController extends Controller
             'phone' => 'required|string|max:20|unique:users',
             'birth_date' => 'nullable|date',
             'address' => 'nullable|string',
-            'city_id' => 'nullable', // Keep for backward compatibility if needed, though we use regency_id now
+            'city_id' => 'nullable', // Keep for backward compatibility
             'province_id' => 'nullable|exists:provinces,id',
             'regency_id' => 'nullable|exists:regencies,id',
             'district_id' => 'nullable|exists:districts,id',
             'village_id' => 'nullable|exists:villages,id',
+            'branch_id' => 'nullable|exists:branches,id',
             'password' => 'required|string|min:6|confirmed',
         ]);
 
@@ -54,6 +55,7 @@ class AuthController extends Controller
             'regency_id' => $request->regency_id,
             'district_id' => $request->district_id,
             'village_id' => $request->village_id,
+            'branch_id' => $request->branch_id,
             'password' => Hash::make($request->password),
             'role' => 'customer',
             'registration_source' => 'app',

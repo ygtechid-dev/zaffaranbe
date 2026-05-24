@@ -20,13 +20,19 @@ class CalendarController extends Controller
             ->when($branchId && $branchId !== 'all', function ($q) use ($branchId) {
                 return $q->where('branch_id', $branchId);
             })
-            ->where(function ($q) {
-                $q->where('is_blocked', true)
-                    ->orWhere(function ($q2) {
-                        // Show all non-cancelled bookings (including unpaid)
-                        $q2->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending']);
-                    });
-            });
+       ->where(function ($q) {
+    $q->where('is_blocked', true)
+        ->orWhere(function ($q2) {
+            // Show all non-cancelled bookings (including unpaid)
+            $q2->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending'])
+                ->orWhere(function ($q3) {
+                    // Show cancelled bookings that have refund
+                    $q3->where('status', 'cancelled')
+                        ->whereNotNull('refund_amount')
+                        ->where('refund_amount', '>', 0);
+                });
+        });
+});
 
         switch ($view) {
             case 'day':
@@ -52,42 +58,43 @@ class CalendarController extends Controller
             $entries = [];
 
             // Base data shared by all entries for this booking
-            $baseData = [
-                'id' => $booking->id,
-                'date' => $booking->booking_date instanceof \Carbon\Carbon ? $booking->booking_date->toDateString() : $booking->booking_date,
-                'customer' => $booking->user ? $booking->user->name : ($booking->guest_name ?? ($booking->is_blocked ? 'Blocked Time' : 'Walk-in')),
-                'customerPhone' => $booking->user ? $booking->user->phone : ($booking->guest_phone ?? null),
-                'status' => $booking->status,
-                'paymentStatus' => $booking->payment_status,
-                'totalPaid' => $booking->payments->where('status', 'success')->sum('amount'),
-                'invoiceNumber' => $booking->booking_ref,
-                'notes' => $booking->notes,
-                'isBlocked' => $booking->is_blocked,
-                'blockReason' => $booking->block_reason,
-                'user_id' => $booking->user_id,
-                'promoCode' => $booking->promo_code,
-                'discountAmount' => (float) $booking->discount_amount,
-                'is_rescheduled' => (bool) $booking->is_rescheduled,
-                'guestCount' => $booking->items->unique(function ($item) use ($booking) {
-                    $name = $item->guest_name ?? $booking->guest_name ?? 'Guest';
-                    $phone = $item->guest_phone ?? $booking->guest_phone ?? '';
-                    return strtolower(trim($name . '-' . $phone));
-                })->count(),
-                'products' => $booking->transaction && $booking->transaction->items
-                    ? $booking->transaction->items->filter(function ($item) {
-                        return $item->type === 'product' || $item->product_id;
-                    })->map(function ($item) {
-                        return [
-                            'id' => $item->id,
-                            'name' => $item->product->name ?? $item->name ?? 'Produk',
-                            'quantity' => $item->quantity,
-                            'price' => (float) $item->price,
-                            'subtotal' => (float) $item->subtotal,
-                            'variant' => $item->variant->name ?? null,
-                        ];
-                    })->values()
-                    : [],
+          $baseData = [
+    'id' => $booking->id,
+    'date' => $booking->booking_date instanceof \Carbon\Carbon ? $booking->booking_date->toDateString() : $booking->booking_date,
+    'customer' => $booking->user ? $booking->user->name : ($booking->guest_name ?? ($booking->is_blocked ? 'Blocked Time' : 'Walk-in')),
+    'customerPhone' => $booking->user ? $booking->user->phone : ($booking->guest_phone ?? null),
+    'status' => $booking->status,
+    'paymentStatus' => $booking->payment_status,
+    'totalPaid' => $booking->payments->where('status', 'success')->sum('amount'),
+    'invoiceNumber' => $booking->booking_ref,
+    'notes' => $booking->notes,
+    'isBlocked' => $booking->is_blocked,
+    'blockReason' => $booking->block_reason,
+    'user_id' => $booking->user_id,
+    'promoCode' => $booking->promo_code,
+    'discountAmount' => (float) $booking->discount_amount,
+    'refundAmount' => (float) $booking->refund_amount, // ← tambah ini
+    'is_rescheduled' => (bool) $booking->is_rescheduled,
+    'guestCount' => $booking->items->unique(function ($item) use ($booking) {
+        $name = $item->guest_name ?? $booking->guest_name ?? 'Guest';
+        $phone = $item->guest_phone ?? $booking->guest_phone ?? '';
+        return strtolower(trim($name . '-' . $phone));
+    })->count(),
+    'products' => $booking->transaction && $booking->transaction->items
+        ? $booking->transaction->items->filter(function ($item) {
+            return $item->type === 'product' || $item->product_id;
+        })->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'name' => $item->product->name ?? $item->name ?? 'Produk',
+                'quantity' => $item->quantity,
+                'price' => (float) $item->price,
+                'subtotal' => (float) $item->subtotal,
+                'variant' => $item->variant->name ?? null,
             ];
+        })->values()
+        : [],
+];
 
             // Map guests for the detail modal
             $guests = $booking->items->map(function ($item) use ($booking) {
