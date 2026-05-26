@@ -437,7 +437,7 @@ $router->post('/featured', 'ServiceController@updateFeatured');
             $router->post('/categories', 'CategoryController@store'); // Added Category Store
             $router->put('/categories/{id}', 'CategoryController@update'); // Added Category Update
             $router->delete('/categories/{id}', 'CategoryController@destroy'); // Added Category Destroy
-
+  $router->post('/{id}/upload-image', 'ProductController@uploadImage'); 
             $router->get('/{id}', 'ProductController@show');
             $router->put('/{id}', 'ProductController@update');
             $router->delete('/{id}', 'ProductController@destroy');
