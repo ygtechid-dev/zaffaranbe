@@ -95,19 +95,21 @@ class Product extends Model
     /**
      * Get computed retail price - uses first variant price if has variants, otherwise own price
      */
-    public function getComputedRetailPriceAttribute($value)
-    {
-        // If a specific value was set (e.g. via setAttribute in Controller for branch pricing), use it
-        if ($value !== null) {
-            return (float) $value;
-        }
-
-        if ($this->hasVariants()) {
-            $firstVariant = $this->variants->first();
-            return $firstVariant ? $firstVariant->retail_price : 0;
-        }
-        return (float) $this->retail_price;
+ public function getComputedRetailPriceAttribute($value = null)
+{
+    if ($value !== null) {
+        return (float) $value;
     }
+
+    if ($this->hasVariants()) {
+        $firstVariant = $this->relationLoaded('variants') 
+            ? $this->variants->first() 
+            : $this->variants()->first();
+        return $firstVariant ? (float) $firstVariant->retail_price : 0;
+    }
+    
+    return (float) $this->retail_price;
+}
 
     /**
      * Get total stock - sum of all variant stocks if has variants, otherwise own stocks
