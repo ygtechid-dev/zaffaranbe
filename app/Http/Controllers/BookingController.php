@@ -829,13 +829,14 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
 
         // Prepare consistent booking_data
        $bookingData = [
-    'user_id' => auth()->id(),
+       'user_id' => auth()->id(),
     'branch_id' => $request->branch_id,
     'booking_date' => $request->booking_date,
     'total_price' => $totalPrice,
     'service_price' => $totalServicePrice,
     'room_charge' => $totalRoomCharge,
     'product_total' => $productTotal,
+    'product_items' => $request->input('product_items', []), // TAMBAH INI
     'duration' => $totalDuration,
     'payment_type' => $request->payment_type ?? 'full_payment',
     'nominal_dp' => $request->payment_type === 'down_payment' ? ($request->nominal_dp ?? 0) : 0,
@@ -917,6 +918,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
                 ->orderBy('created_at', 'desc')
                 ->first();
 
+    
             $booking->forceFill([
                 'id' => 99900000 + $log->id,
                 'status' => $status,
@@ -942,7 +944,9 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
                 'expires_at' => $log->expired_at,
                 'is_pending_log' => true,
                 'payment_log_id' => $log->id,
-                'recent_payment_id' => $recentPayment ? $recentPayment->id : null
+                'recent_payment_id' => $recentPayment ? $recentPayment->id : null,
+                    'product_items' => $data['product_items'] ?? [],  // TAMBAH INI
+
             ]);
 
             return $booking;
@@ -989,6 +993,19 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
         /** @var \Illuminate\Pagination\LengthAwarePaginator $bookings */
         if ($bookings->currentPage() === 1) {
             $realCollection = $bookings->getCollection();
+
+
+             $realCollection->transform(function ($booking) {
+        $recentPayment = $booking->payments->sortByDesc('created_at')->first();
+        if ($recentPayment && $recentPayment->payment_log_id) {
+            $pl = \App\Models\PaymentLog::find($recentPayment->payment_log_id);
+            $booking->product_items = $pl ? ($pl->booking_data['product_items'] ?? []) : [];
+        } else {
+            $booking->product_items = [];
+        }
+        return $booking;
+    });
+
 
             // Filter pending bookings that duplicate real bookings (same date & time)
             // This prevents showing "Awaiting Payment" drafts when a confirmed booking already exists
@@ -1046,11 +1063,21 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             return response()->json($booking);
         }
 
-        $booking = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.therapist', 'items.room'])
-            ->where('user_id', auth()->id())
-            ->findOrFail($id);
+       $booking = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.therapist', 'items.room'])
+    ->where('user_id', auth()->id())
+    ->findOrFail($id);
 
-        return response()->json($booking);
+$recentPayment = $booking->payments->sortByDesc('created_at')->first();
+if ($recentPayment && $recentPayment->payment_log_id) {
+    $pl = \App\Models\PaymentLog::find($recentPayment->payment_log_id);
+    $booking->product_items = $pl ? ($pl->booking_data['product_items'] ?? []) : [];
+} else {
+    $booking->product_items = [];
+}
+
+return response()->json($booking);
+
+
     }
 
     /**

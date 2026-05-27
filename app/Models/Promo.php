@@ -21,16 +21,19 @@ class Promo extends Model
         'min_purchase',
         'max_discount',
         'applicable_services',
-        'branch_id'
+        'branch_id',
+        'service_category_id',
+        'is_featured',
     ];
 
     protected $casts = [
-        'discount' => 'decimal:2',
-        'min_purchase' => 'decimal:2',
-        'max_discount' => 'decimal:2',
-        'applicable_services' => 'array',
-        'start_date' => 'datetime',
-        'end_date' => 'datetime'
+        'discount'             => 'decimal:2',
+        'min_purchase'         => 'decimal:2',
+        'max_discount'         => 'decimal:2',
+        'applicable_services'  => 'array',
+        'start_date'           => 'datetime',
+        'end_date'             => 'datetime',
+        'is_featured'          => 'boolean',
     ];
 
     protected $appends = ['remaining_quota', 'is_valid'];
@@ -38,6 +41,12 @@ class Promo extends Model
     public function branch()
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    // NEW
+    public function promoServices()
+    {
+        return $this->hasMany(PromoService::class);
     }
 
     public function getRemainingQuotaAttribute()
@@ -66,7 +75,6 @@ class Promo extends Model
     {
         $this->increment('used');
 
-        // Check if expired
         if ($this->used >= $this->quota) {
             $this->update(['status' => 'expired']);
         }

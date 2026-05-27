@@ -690,6 +690,7 @@ $router->post('/featured', 'ServiceController@updateFeatured');
             $router->post('/', 'Admin\\PromoController@store');
             $router->get('/{id}', 'Admin\\PromoController@show');
             $router->put('/{id}', 'Admin\\PromoController@update');
+            $router->put('/{id}/featured', 'Admin\\PromoController@toggleFeatured');
             $router->delete('/{id}', 'Admin\\PromoController@destroy');
             $router->post('/validate', 'Admin\\PromoController@validateCode');
         });

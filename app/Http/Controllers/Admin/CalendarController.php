@@ -7,6 +7,7 @@ use App\Models\Booking;
 use App\Models\Therapist;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
+use App\Models\PaymentLog;
 
 class CalendarController extends Controller
 {
@@ -80,20 +81,41 @@ class CalendarController extends Controller
         $phone = $item->guest_phone ?? $booking->guest_phone ?? '';
         return strtolower(trim($name . '-' . $phone));
     })->count(),
-    'products' => $booking->transaction && $booking->transaction->items
-        ? $booking->transaction->items->filter(function ($item) {
-            return $item->type === 'product' || $item->product_id;
-        })->map(function ($item) {
-            return [
-                'id' => $item->id,
-                'name' => $item->product->name ?? $item->name ?? 'Produk',
-                'quantity' => $item->quantity,
-                'price' => (float) $item->price,
-                'subtotal' => (float) $item->subtotal,
-                'variant' => $item->variant->name ?? null,
-            ];
-        })->values()
-        : [],
+  'products' => ($booking->transaction && $booking->transaction->items && $booking->transaction->items->filter(function ($item) {
+    return $item->type === 'product' || $item->product_id;
+})->count() > 0)
+    ? $booking->transaction->items->filter(function ($item) {
+        return $item->type === 'product' || $item->product_id;
+    })->map(function ($item) {
+        return [
+            'id' => $item->id,
+            'name' => $item->product->name ?? $item->name ?? 'Produk',
+            'quantity' => $item->quantity,
+            'price' => (float) $item->price,
+            'subtotal' => (float) $item->subtotal,
+            'variant' => $item->variant->name ?? null,
+        ];
+    })->values()
+    : (function () use ($booking) {
+        $recentPayment = \App\Models\Payment::where('booking_id', $booking->id)
+            ->orderBy('created_at', 'desc')
+            ->first();
+        if ($recentPayment && $recentPayment->payment_log_id) {
+            $pl = \App\Models\PaymentLog::find($recentPayment->payment_log_id);
+            $items = $pl ? ($pl->booking_data['product_items'] ?? []) : [];
+            return collect($items)->map(function ($item) {
+                return [
+                    'id' => $item['product_id'] ?? null,
+                    'name' => $item['name'] ?? 'Produk',
+                    'quantity' => $item['quantity'] ?? 1,
+                    'price' => (float) ($item['price'] ?? 0),
+                    'subtotal' => (float) ($item['price'] ?? 0) * ($item['quantity'] ?? 1),
+                    'variant' => null,
+                ];
+            })->values();
+        }
+        return collect([]);
+    })(),
 ];
 
             // Map guests for the detail modal
