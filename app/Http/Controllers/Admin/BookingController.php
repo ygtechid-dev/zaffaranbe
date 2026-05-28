@@ -401,6 +401,15 @@ class BookingController extends Controller
                 $itemDuration = $variant ? $variant->duration : $s->duration;
                 $itemPrice = $variant ? $variant->price : $s->price;
 
+                // Use special_price if customer is selected (user_id provided)
+                if ($request->user_id) {
+                    if ($variant && $variant->special_price && $variant->special_price > 0) {
+                        $itemPrice = $variant->special_price;
+                    } elseif (!$variant && $s->special_price && $s->special_price > 0) {
+                        $itemPrice = $s->special_price;
+                    }
+                }
+
                 $itemEndTime = date('H:i', strtotime($itemStartTime) + ($itemDuration * 60));
 
                 // Update running time for next sequential item
