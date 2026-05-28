@@ -72,6 +72,8 @@ class PromoController extends Controller
             'promo_services.*.service_id'     => 'nullable|integer|exists:services,id',
             'promo_services.*.discount_type'  => 'required_with:promo_services|in:percent,nominal',
             'promo_services.*.discount_value' => 'required_with:promo_services|numeric|min:0',
+            'promo_services.*.variant_id' => 'nullable|integer|exists:service_variants,id',
+
         ]);
 
         $promo = Promo::create([
@@ -93,6 +95,7 @@ class PromoController extends Controller
             foreach ($request->promo_services as $ps) {
                 $promo->promoServices()->create([
                     'service_id'          => $ps['service_id'] ?? null,
+                           'variant_id'          => $ps['variant_id'] ?? null,  // 👈 tambah
                     'service_category_id' => $ps['service_category_id'] ?? null,
                     'discount_type'       => $ps['discount_type'] ?? 'percent',
                     'discount_value'      => $ps['discount_value'] ?? 0,
@@ -155,6 +158,7 @@ class PromoController extends Controller
                 foreach ($request->promo_services as $ps) {
                     $promo->promoServices()->create([
                         'service_id'          => $ps['service_id'] ?? null,
+                                'variant_id'          => $ps['variant_id'] ?? null,  // 👈 tambah
                         'service_category_id' => $ps['service_category_id'] ?? null,
                         'discount_type'       => $ps['discount_type'] ?? 'percent',
                         'discount_value'      => $ps['discount_value'] ?? 0,

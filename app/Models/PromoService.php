@@ -9,6 +9,7 @@ class PromoService extends Model
     protected $fillable = [
         'promo_id',
         'service_id',
+           'variant_id',      
         'service_category_id',
         'discount_type',
         'discount_value',
