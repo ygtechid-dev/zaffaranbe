@@ -83,7 +83,7 @@ class PromoController extends Controller
             'start_date'          => $request->start_date,
             'end_date'            => $request->end_date,
             'description'         => $request->description,
-                'terms'               => $request->terms ? json_encode($request->terms) : null, // 👈 tambah sini
+          'terms' => $request->terms ?? null,
             'branch_id'           => $request->branch_id,
             'service_category_id' => $request->service_category_id,
             'status'              => 'active',
@@ -142,7 +142,7 @@ class PromoController extends Controller
             'start_date'          => $request->input('start_date', $promo->start_date),
             'end_date'            => $request->input('end_date', $promo->end_date),
             'description'         => $request->input('description', $promo->description),
-                'terms'               => $request->has('terms') ? json_encode($request->terms) : $promo->terms, // 👈 tambah sini
+              'terms' => $request->terms ?? null,
             'branch_id'           => $request->input('branch_id', $promo->branch_id),
             'service_category_id' => $request->input('service_category_id', $promo->service_category_id),
         ]);
