@@ -12,7 +12,7 @@ class PromoController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Promo::with('promoServices');
+        $query = Promo::with(['promoServices.service', 'promoServices.variant']);
 
         if ($request->has('status')) {
             $query->where('status', $request->status);
@@ -66,14 +66,13 @@ class PromoController extends Controller
             'quota'                           => 'required|integer|min:1',
             'start_date'                      => 'required|date',
             'end_date'                        => 'required|date|after_or_equal:start_date',
-              'terms'                           => 'nullable|array', // 👈 tambah sini
-    'terms.*'                         => 'nullable|string|max:500', // 👈 dan ini
+            'terms'                           => 'nullable|array',
+            'terms.*'                         => 'nullable|string|max:500',
             'promo_services'                  => 'required_if:type,service|required_if:type,featured|array|min:1',
             'promo_services.*.service_id'     => 'nullable|integer|exists:services,id',
             'promo_services.*.discount_type'  => 'required_with:promo_services|in:percent,nominal',
             'promo_services.*.discount_value' => 'required_with:promo_services|numeric|min:0',
-            'promo_services.*.variant_id' => 'nullable|integer|exists:service_variants,id',
-
+            'promo_services.*.variant_id'     => 'nullable|integer|exists:service_variants,id',
         ]);
 
         $promo = Promo::create([
@@ -85,7 +84,7 @@ class PromoController extends Controller
             'start_date'          => $request->start_date,
             'end_date'            => $request->end_date,
             'description'         => $request->description,
-          'terms' => $request->terms ?? null,
+            'terms'               => $request->terms ?? null,
             'branch_id'           => $request->branch_id,
             'service_category_id' => $request->service_category_id,
             'status'              => 'active',
@@ -95,7 +94,7 @@ class PromoController extends Controller
             foreach ($request->promo_services as $ps) {
                 $promo->promoServices()->create([
                     'service_id'          => $ps['service_id'] ?? null,
-                           'variant_id'          => $ps['variant_id'] ?? null,  // 👈 tambah
+                    'variant_id'          => $ps['variant_id'] ?? null,
                     'service_category_id' => $ps['service_category_id'] ?? null,
                     'discount_type'       => $ps['discount_type'] ?? 'percent',
                     'discount_value'      => $ps['discount_value'] ?? 0,
@@ -103,7 +102,7 @@ class PromoController extends Controller
             }
         }
 
-        $promo->load('promoServices');
+        $promo->load(['promoServices.service', 'promoServices.variant']);
 
         AuditLog::log('create', 'promo', "Created promo: {$promo->title}");
 
@@ -112,7 +111,7 @@ class PromoController extends Controller
 
     public function show($id)
     {
-        $promo = Promo::with('promoServices')->findOrFail($id);
+        $promo = Promo::with(['promoServices.service', 'promoServices.variant'])->findOrFail($id);
         return response()->json($promo);
     }
 
@@ -132,6 +131,7 @@ class PromoController extends Controller
             'promo_services.*.service_id'     => 'nullable|integer|exists:services,id',
             'promo_services.*.discount_type'  => 'required_with:promo_services|in:percent,nominal',
             'promo_services.*.discount_value' => 'required_with:promo_services|numeric|min:0',
+            'promo_services.*.variant_id'     => 'nullable|integer|exists:service_variants,id',
         ]);
 
         $type = $request->input('type', $promo->type);
@@ -145,20 +145,19 @@ class PromoController extends Controller
             'start_date'          => $request->input('start_date', $promo->start_date),
             'end_date'            => $request->input('end_date', $promo->end_date),
             'description'         => $request->input('description', $promo->description),
-              'terms' => $request->terms ?? null,
+            'terms'               => $request->terms ?? null,
             'branch_id'           => $request->input('branch_id', $promo->branch_id),
             'service_category_id' => $request->input('service_category_id', $promo->service_category_id),
         ]);
 
         if ($request->has('promo_services')) {
-            // Replace all existing promo services
             $promo->promoServices()->delete();
 
             if (in_array($type, ['service', 'featured'])) {
                 foreach ($request->promo_services as $ps) {
                     $promo->promoServices()->create([
                         'service_id'          => $ps['service_id'] ?? null,
-                                'variant_id'          => $ps['variant_id'] ?? null,  // 👈 tambah
+                        'variant_id'          => $ps['variant_id'] ?? null,
                         'service_category_id' => $ps['service_category_id'] ?? null,
                         'discount_type'       => $ps['discount_type'] ?? 'percent',
                         'discount_value'      => $ps['discount_value'] ?? 0,
@@ -167,7 +166,7 @@ class PromoController extends Controller
             }
         }
 
-        $promo->load('promoServices');
+        $promo->load(['promoServices.service', 'promoServices.variant']);
 
         AuditLog::log('update', 'promo', "Updated promo: {$promo->title}");
 
@@ -197,7 +196,7 @@ class PromoController extends Controller
             'is_featured' => (bool) $isFeatured,
         ]);
 
-        $promo->load('promoServices');
+        $promo->load(['promoServices.service', 'promoServices.variant']);
 
         AuditLog::log('update', 'promo', ($isFeatured ? 'Set' : 'Unset') . " featured promo: {$promo->title}");
 
@@ -210,7 +209,9 @@ class PromoController extends Controller
             'code' => 'required|string'
         ]);
 
-        $promo = Promo::with('promoServices')->where('code', $request->code)->first();
+        $promo = Promo::with(['promoServices.service', 'promoServices.variant'])
+            ->where('code', $request->code)
+            ->first();
 
         if (!$promo) {
             return response()->json(['valid' => false, 'message' => 'Kode promo tidak ditemukan'], 404);
