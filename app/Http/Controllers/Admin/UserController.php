@@ -13,14 +13,14 @@ class UserController extends Controller
 {
     public function index(Request $request)
     {
-        $query = User::with(['therapist', 'branch'])->whereIn('role', ['super_admin', 'admin', 'cashier', 'owner', 'branch_manager']);
+        $query = User::with(['therapist', 'branch'])->where('role', '!=', 'customer');
 
         if ($request->has('branch_id') && $request->branch_id != 'all' && $request->branch_id != '') {
             $query->where('branch_id', $request->branch_id);
         } else {
             // If not super_admin/owner, restrict to own branch
             $user = auth()->user();
-            if ($user && !in_array($user->role, ['super_admin', 'owner']) && $user->branch_id) {
+            if ($user && !in_array(strtolower($user->role), ['super_admin', 'owner', 'admin']) && $user->branch_id) {
                 $query->where('branch_id', $user->branch_id);
             }
         }
@@ -54,7 +54,7 @@ class UserController extends Controller
             'name' => 'required_without:staff_id|string|max:255',
             'email' => 'required_without:staff_id|email|unique:users,email',
             'phone' => 'required_without:staff_id|string|unique:users,phone',
-            'role' => 'required|in:super_admin,admin,cashier,owner,branch_manager',
+            'role' => 'required|string',
             'password' => 'required|string|min:6',
             'staff_id' => 'nullable|exists:therapists,id|unique:users,staff_id',
         ]);
@@ -97,7 +97,7 @@ class UserController extends Controller
 
     public function show($id)
     {
-        $user = User::whereIn('role', ['super_admin', 'admin', 'cashier', 'owner', 'branch_manager'])
+        $user = User::where('role', '!=', 'customer')
             ->findOrFail($id);
 
         return response()->json($user);
@@ -105,7 +105,7 @@ class UserController extends Controller
 
     public function update(Request $request, $id)
     {
-        $user = User::whereIn('role', ['super_admin', 'admin', 'cashier', 'owner', 'branch_manager'])
+        $user = User::where('role', '!=', 'customer')
             ->findOrFail($id);
 
         $validator = Validator::make($request->all(), [
