@@ -66,6 +66,8 @@ class PromoController extends Controller
             'quota'                           => 'required|integer|min:1',
             'start_date'                      => 'required|date',
             'end_date'                        => 'required|date|after_or_equal:start_date',
+              'terms'                           => 'nullable|array', // 👈 tambah sini
+    'terms.*'                         => 'nullable|string|max:500', // 👈 dan ini
             'promo_services'                  => 'required_if:type,service|required_if:type,featured|array|min:1',
             'promo_services.*.service_id'     => 'nullable|integer|exists:services,id',
             'promo_services.*.discount_type'  => 'required_with:promo_services|in:percent,nominal',
@@ -81,6 +83,7 @@ class PromoController extends Controller
             'start_date'          => $request->start_date,
             'end_date'            => $request->end_date,
             'description'         => $request->description,
+                'terms'               => $request->terms ? json_encode($request->terms) : null, // 👈 tambah sini
             'branch_id'           => $request->branch_id,
             'service_category_id' => $request->service_category_id,
             'status'              => 'active',
@@ -139,6 +142,7 @@ class PromoController extends Controller
             'start_date'          => $request->input('start_date', $promo->start_date),
             'end_date'            => $request->input('end_date', $promo->end_date),
             'description'         => $request->input('description', $promo->description),
+                'terms'               => $request->has('terms') ? json_encode($request->terms) : $promo->terms, // 👈 tambah sini
             'branch_id'           => $request->input('branch_id', $promo->branch_id),
             'service_category_id' => $request->input('service_category_id', $promo->service_category_id),
         ]);
