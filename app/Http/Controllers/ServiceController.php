@@ -158,7 +158,7 @@ class ServiceController extends Controller
         }
 
         $maxPosition = Service::where('category', $request->category)->max('position');
-        $serviceData = array_merge($request->except(['image']), [
+        $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url']), [
             'is_global' => $isGlobal,
             'position' => $maxPosition + 1
         ]);
@@ -278,7 +278,7 @@ class ServiceController extends Controller
         $oldPrice = $service->price;
         $oldSpecialPrice = $service->special_price;
 
-        $serviceData = array_merge($request->except(['image']), ['is_global' => $isGlobal]);
+        $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url']), ['is_global' => $isGlobal]);
         $service->update($serviceData);
 
         if ($oldPrice != $service->price) {
