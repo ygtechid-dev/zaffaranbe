@@ -279,6 +279,14 @@ class ServiceController extends Controller
         $oldSpecialPrice = $service->special_price;
 
         $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url']), ['is_global' => $isGlobal]);
+        
+        \Log::info('[ServiceUpdate] availability data received:', [
+            'is_limited_availability' => $request->input('is_limited_availability'),
+            'availability_type' => $request->input('availability_type'),
+            'availability_data' => $request->input('availability_data'),
+            'serviceData_keys' => array_keys($serviceData),
+        ]);
+        
         $service->update($serviceData);
 
         if ($oldPrice != $service->price) {

@@ -103,146 +103,151 @@ class BookingController extends Controller
         return response()->json($booking);
     }
 
-    public function updateStatus(Request $request, $id)
-    {
-        $validator = Validator::make($request->all(), [
-            'status' => 'required|in:awaiting_payment,confirmed,in_progress,completed,cancelled,no_show',
-            'notes' => 'nullable|string',
-        ]);
+ public function updateStatus(Request $request, $id)
+{
+    $validator = Validator::make($request->all(), [
+        'status' => 'required|in:awaiting_payment,confirmed,in_progress,completed,cancelled,no_show',
+        'notes' => 'nullable|string',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $booking = Booking::findOrFail($id);
-
-        $updateData = ['status' => $request->status];
-
-        if ($request->status === 'completed') {
-            $updateData['completed_at'] = Carbon::now();
-            // Record Commission
-            $this->recordCommission($booking);
-        } elseif ($request->status === 'cancelled') {
-            $updateData['cancelled_at'] = Carbon::now();
-            // Notify Staff of Cancellation
-            if ($booking->therapist) {
-                if ($booking->therapist->phone) {
-                    $this->whatsappService->sendStaffCancellationNotification($booking->therapist->phone, $booking);
-                }
-                if ($booking->therapist->email) {
-                    $this->emailService->sendStaffCancellationNotification($booking->therapist->email, $booking);
-                }
-            }
-        } elseif ($request->status === 'confirmed') {
-            $updateData['confirmed_at'] = Carbon::now();
-        }
-
-        if ($request->has('notes')) {
-            $updateData['notes'] = $request->notes;
-        }
-
-        $booking->update($updateData);
-
-        AuditLog::log('update', 'Reservasi', "Updated booking status to {$request->status} for REF: {$booking->booking_ref}");
-
-        // TODO: Send notification to customer
-
-        return response()->json([
-            'message' => 'Booking status updated successfully',
-            'booking' => $booking->fresh(['user', 'service', 'therapist', 'room']),
-        ]);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
 
-    private function recordCommission(Booking $booking)
-    {
-        // Clear existing commissions to prevent duplicates/ensure correct recalculation
+    $booking = Booking::findOrFail($id);
+
+    $updateData = ['status' => $request->status];
+
+    if ($request->status === 'completed') {
+        $updateData['completed_at'] = Carbon::now();
+        $this->recordCommission($booking);
+
+    } elseif ($request->status === 'cancelled') {
+        $updateData['cancelled_at'] = Carbon::now();
+
+        // Void semua komisi kalau booking dibatalkan
         \App\Models\StaffCommission::where('booking_id', $booking->id)->delete();
 
-        $items = $booking->items;
-
-        // Fallback for bookings without items (legacy or migrated)
-        if ($items->isEmpty()) {
-            // Treat the booking itself as a single item transaction
-            if ($booking->therapist) {
-                $this->createCommissionForSingleItem(
-                    $booking,
-                    $booking->therapist,
-                    $booking->service,
-                    $booking->service_price
-                );
+        if ($booking->therapist) {
+            if ($booking->therapist->phone) {
+                $this->whatsappService->sendStaffCancellationNotification($booking->therapist->phone, $booking);
             }
-            return;
-        }
-
-        // Process each item
-        foreach ($items as $item) {
-            $therapist = $item->therapist ?: ($item->therapist_id ? \App\Models\Therapist::find($item->therapist_id) : null);
-            $service = $item->service ?: ($item->service_id ? \App\Models\Service::find($item->service_id) : null);
-
-            if ($therapist && $service) {
-                $this->createCommissionForSingleItem(
-                    $booking,
-                    $therapist,
-                    $service,
-                    $item->price
-                );
+            if ($booking->therapist->email) {
+                $this->emailService->sendStaffCancellationNotification($booking->therapist->email, $booking);
             }
         }
+
+    } elseif ($request->status === 'confirmed') {
+        $updateData['confirmed_at'] = Carbon::now();
     }
 
-    private function createCommissionForSingleItem($booking, $therapist, $service, $itemPrice)
-    {
-        if (!$therapist || !$service)
-            return;
+    if ($request->has('notes')) {
+        $updateData['notes'] = $request->notes;
+    }
 
-        $commRule = $therapist->getCommissionForService($service->id);
-        $basePrice = $itemPrice;
+    $booking->update($updateData);
 
-        // Fetch company settings
-        $settings = \App\Models\CompanySettings::where('branch_id', $booking->branch_id)->first()
-            ?? \App\Models\CompanySettings::whereNull('branch_id')->first();
+    AuditLog::log('update', 'Reservasi', "Updated booking status to {$request->status} for REF: {$booking->booking_ref}");
 
-        $calculateBeforeDiscount = $settings && $settings->commission_before_discount;
-        $calculateAfterDiscount = $settings && $settings->commission_after_discount;
+    return response()->json([
+        'message' => 'Booking status updated successfully',
+        'booking' => $booking->fresh(['user', 'service', 'therapist', 'room']),
+    ]);
+}
 
-        // Apply Discount Logic
+  private function recordCommission(Booking $booking)
+{
+    \App\Models\StaffCommission::where('booking_id', $booking->id)->delete();
+
+    $items = $booking->items;
+
+    if ($items->isEmpty()) {
+        if ($booking->therapist) {
+            $this->createCommissionForSingleItem(
+                $booking,
+                $booking->therapist,
+                $booking->service,
+                $booking->service_price
+            );
+        }
+        return;
+    }
+
+    foreach ($items as $item) {
+        // Skip item yang cancelled atau refunded
+        if (in_array($item->status, ['cancelled', 'refunded'])) {
+            continue;
+        }
+
+        $therapist = $item->therapist ?: ($item->therapist_id ? \App\Models\Therapist::find($item->therapist_id) : null);
+        $service = $item->service ?: ($item->service_id ? \App\Models\Service::find($item->service_id) : null);
+
+        if ($therapist && $service) {
+            $this->createCommissionForSingleItem(
+                $booking,
+                $therapist,
+                $service,
+                $item->price
+            );
+        }
+    }
+}
+
+  private function createCommissionForSingleItem($booking, $therapist, $service, $itemPrice)
+{
+    if (!$therapist || !$service) return;
+
+    $commRule = $therapist->getCommissionForService($service->id);
+
+    // Kalau rate 0, tidak perlu lanjut
+    if ((float) $commRule['rate'] === 0.0) return;
+
+    $settings = \App\Models\CompanySettings::where('branch_id', $booking->branch_id)->first()
+        ?? \App\Models\CompanySettings::whereNull('branch_id')->first();
+
+    $calculateBeforeDiscount = $settings && $settings->commission_before_discount;
+
+    $basePrice = (float) $itemPrice;
+
+    if (!$calculateBeforeDiscount) {
         $transaction = $booking->transaction;
-        if (!$calculateBeforeDiscount && ($calculateAfterDiscount || !$settings)) {
-            if ($transaction && $transaction->discount > 0 && $transaction->subtotal > 0) {
-                // Calculate proportional discount for this item
-                $ratio = $basePrice / ($transaction->subtotal ?: 1); // Avoid division by zero
-                $discountShare = $transaction->discount * $ratio;
+        if ($transaction) {
+            $totalSubtotal = (float) $transaction->subtotal;
+            $totalDiscount = (float) $transaction->discount + (float) ($transaction->promo_amount ?? 0);
 
-                $basePrice -= $discountShare;
-                if ($basePrice < 0)
-                    $basePrice = 0;
+            if ($totalDiscount > 0 && $totalSubtotal > 0) {
+                $ratio = $basePrice / $totalSubtotal;
+                $discountShare = $totalDiscount * $ratio;
+                $basePrice = max(0, $basePrice - $discountShare);
             }
         }
-
-        $amount = 0;
-        if ($commRule['type'] === 'percent') {
-            $amount = $basePrice * ($commRule['rate'] / 100);
-        } else {
-            $amount = $commRule['rate'];
-        }
-
-        if ($amount > 0) {
-            \App\Models\StaffCommission::create([
-                'staff_id' => $therapist->id,
-                'branch_id' => $booking->branch_id,
-                'booking_id' => $booking->id,
-                'item_id' => $service->id,
-                'item_type' => 'service',
-                'item_name' => $service->name,
-                'sales_amount' => $basePrice,
-                'qty' => 1,
-                'commission_percentage' => ($commRule['type'] === 'percent') ? $commRule['rate'] : 0,
-                'commission_amount' => $amount,
-                'payment_date' => \Carbon\Carbon::now(),
-                'status' => 'pending',
-            ]);
-        }
     }
+
+    $amount = 0;
+    if ($commRule['type'] === 'percent') {
+        $amount = $basePrice * ($commRule['rate'] / 100);
+    } else {
+        $amount = (float) $commRule['rate']; // fixed amount
+    }
+
+    if ($amount <= 0) return;
+
+    \App\Models\StaffCommission::create([
+        'staff_id'              => $therapist->id,
+        'branch_id'             => $booking->branch_id,
+        'booking_id'            => $booking->id,
+        'item_id'               => $service->id,
+        'item_type'             => 'service',
+        'item_name'             => $service->name,
+        'sales_amount'          => $basePrice,
+        'qty'                   => 1,
+        'commission_percentage' => ($commRule['type'] === 'percent') ? $commRule['rate'] : 0,
+        'commission_amount'     => $amount,
+        'payment_date'          => \Carbon\Carbon::now(),
+        'status'                => 'pending',
+    ]);
+}
+
 
     public function store(Request $request)
     {
@@ -942,83 +947,81 @@ class BookingController extends Controller
         return response()->json(['message' => 'Booking updated successfully', 'booking' => $booking->fresh(['items'])]);
     }
 
-    public function processRefund(Request $request, $id)
-    {
-        $validator = Validator::make($request->all(), [
-            'refund_amount' => 'required|numeric|min:0',
-            'refund_method' => 'required|in:cash,bank_transfer,wallet',
-            'reason' => 'required|string',
-        ]);
+  public function processRefund(Request $request, $id)
+{
+    $validator = Validator::make($request->all(), [
+        'refund_amount' => 'required|numeric|min:0',
+        'refund_method' => 'required|in:cash,bank_transfer,wallet',
+        'reason'        => 'required|string',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $booking = Booking::with('payments')->findOrFail($id);
-
-        if (!in_array($booking->status, ['cancelled', 'no_show'])) {
-            return response()->json([
-                'error' => 'Refund can only be processed for cancelled or no-show bookings'
-            ], 400);
-        }
-
-        $totalPaid = $booking->payments()->where('status', 'success')->sum('amount');
-
-        if ($request->refund_amount > $totalPaid) {
-            return response()->json([
-                'error' => 'Refund amount cannot exceed total paid amount'
-            ], 400);
-        }
-
-        // TODO: Process actual refund via payment gateway
-        // For now, just log the refund request
-
-        $booking->update([
-            'status' => 'refunded', // Update status to refunded
-            'payment_status' => 'refunded',
-            'refund_amount' => $request->refund_amount,
-            'notes' => ($booking->notes ?? '') . "\n\nRefund: Rp " . number_format($request->refund_amount) .
-                " via " . $request->refund_method . ". Reason: " . $request->reason
-        ]);
-
-        // Create Refund Transaction
-        \App\Models\Transaction::create([
-            'booking_id' => $booking->id,
-            'branch_id' => $booking->branch_id,
-            'cashier_id' => auth()->id() ?? null, // Assuming admin/staff is logged in
-            'type' => 'refund',
-            'subtotal' => 0,
-            'discount' => 0,
-            'tax' => 0,
-            'total' => $request->refund_amount,
-            'payment_method' => $request->refund_method,
-            'cash_received' => 0,
-            'change_amount' => 0,
-            'transaction_date' => Carbon::now(),
-            'notes' => "Refund for Booking " . $booking->booking_ref . ". Reason: " . $request->reason
-        ]);
-
-        // Notify Customer
-        $customer = $booking->user;
-        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
-        $email = $customer ? $customer->email : null;
-
-        if ($phone) {
-            $this->whatsappService->sendCustomerRefundNotification($phone, $booking, $request->refund_amount, 'processed');
-        }
-        if ($email) {
-            $this->emailService->sendCustomerRefundNotification($email, $booking, $request->refund_amount, 'processed');
-        }
-
-        AuditLog::log('update', 'Reservasi', "Processed refund Rp " . number_format($request->refund_amount) . " for booking REF: {$booking->booking_ref}");
-
-        return response()->json([
-            'message' => 'Refund processed successfully',
-            'refund_amount' => $request->refund_amount,
-            'method' => $request->refund_method,
-            'booking' => $booking->fresh(),
-        ]);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
+
+    $booking = Booking::with('payments')->findOrFail($id);
+
+    if (!in_array($booking->status, ['cancelled', 'no_show'])) {
+        return response()->json([
+            'error' => 'Refund can only be processed for cancelled or no-show bookings'
+        ], 400);
+    }
+
+    $totalPaid = $booking->payments()->where('status', 'success')->sum('amount');
+
+    if ($request->refund_amount > $totalPaid) {
+        return response()->json([
+            'error' => 'Refund amount cannot exceed total paid amount'
+        ], 400);
+    }
+
+    $booking->update([
+        'status'         => 'refunded',
+        'payment_status' => 'refunded',
+        'refund_amount'  => $request->refund_amount,
+        'notes'          => ($booking->notes ?? '') . "\n\nRefund: Rp " . number_format($request->refund_amount) .
+            " via " . $request->refund_method . ". Reason: " . $request->reason
+    ]);
+
+    // Void semua komisi booking ini (full refund)
+    \App\Models\StaffCommission::where('booking_id', $booking->id)->delete();
+
+    \App\Models\Transaction::create([
+        'booking_id'       => $booking->id,
+        'branch_id'        => $booking->branch_id,
+        'cashier_id'       => auth()->id() ?? null,
+        'type'             => 'refund',
+        'subtotal'         => 0,
+        'discount'         => 0,
+        'tax'              => 0,
+        'total'            => $request->refund_amount,
+        'payment_method'   => $request->refund_method,
+        'cash_received'    => 0,
+        'change_amount'    => 0,
+        'transaction_date' => Carbon::now(),
+        'notes'            => "Refund for Booking " . $booking->booking_ref . ". Reason: " . $request->reason
+    ]);
+
+    $customer = $booking->user;
+    $phone    = $customer ? $customer->phone : ($booking->guest_phone ?? null);
+    $email    = $customer ? $customer->email : null;
+
+    if ($phone) {
+        $this->whatsappService->sendCustomerRefundNotification($phone, $booking, $request->refund_amount, 'processed');
+    }
+    if ($email) {
+        $this->emailService->sendCustomerRefundNotification($email, $booking, $request->refund_amount, 'processed');
+    }
+
+    AuditLog::log('update', 'Reservasi', "Processed refund Rp " . number_format($request->refund_amount) . " for booking REF: {$booking->booking_ref}");
+
+    return response()->json([
+        'message'       => 'Refund processed successfully',
+        'refund_amount' => $request->refund_amount,
+        'method'        => $request->refund_method,
+        'booking'       => $booking->fresh(),
+    ]);
+}
 
     public function reschedule(Request $request, $id)
     {
@@ -1104,67 +1107,67 @@ class BookingController extends Controller
         ]);
     }
 
-    public function cancelItem(Request $request, $id, $itemId)
-    {
-        $item = \App\Models\BookingItem::where('booking_id', $id)->where('id', $itemId)->first();
+  public function cancelItem(Request $request, $id, $itemId)
+{
+    $item = \App\Models\BookingItem::where('booking_id', $id)->where('id', $itemId)->first();
 
-        if (!$item) {
-            // Check for legacy/single-item fallback where ID might match
-            $booking = Booking::find($id);
-            if ($booking && $id == $itemId) {
-                $booking->update([
-                    'status' => 'cancelled',
-                    'cancelled_at' => Carbon::now(),
-                    'cancellation_reason' => $request->reason ?? 'Cancelled by admin'
-                ]);
-                AuditLog::log('update', 'Reservasi', "Cancelled legacy booking REF: {$booking->booking_ref}");
-                return response()->json(['message' => 'Booking cancelled successfully', 'booking' => $booking->fresh(['items'])]);
-            }
-            // Throw 404 if truly not found
-            abort(404, "Booking item not found (ID: {$itemId} for Booking: {$id})");
+    if (!$item) {
+        $booking = Booking::find($id);
+        if ($booking && $id == $itemId) {
+            $booking->update([
+                'status' => 'cancelled',
+                'cancelled_at' => Carbon::now(),
+                'cancellation_reason' => $request->reason ?? 'Cancelled by admin'
+            ]);
+
+            // Void semua komisi booking ini
+            \App\Models\StaffCommission::where('booking_id', $booking->id)->delete();
+
+            AuditLog::log('update', 'Reservasi', "Cancelled legacy booking REF: {$booking->booking_ref}");
+            return response()->json(['message' => 'Booking cancelled successfully', 'booking' => $booking->fresh(['items'])]);
         }
-
-        $booking = $item->booking;
-
-        $oldTotalPrice = $booking->total_price;
-        $oldItems = $booking->items->toArray();
-
-        // Update Item Status instead of delete
-        $item->update([
-            'status' => 'cancelled',
-            'cancellation_reason' => $request->reason ?? 'Cancelled by admin'
-        ]);
-
-        $this->recalculateBooking($booking);
-
-        // Log Agenda Change (Cancellation)
-        $newTotalPrice = $booking->total_price;
-        $priceDiff = $newTotalPrice - $oldTotalPrice;
-
-        BookingAgendaLog::create([
-            'booking_id' => $booking->id,
-            'booking_item_id' => $item->id,
-            'action' => 'cancel_item',
-            'old_data' => [
-                'items' => $oldItems,
-                'total_price' => $oldTotalPrice
-            ],
-            'new_data' => [
-                'cancelled_item_id' => $item->id,
-                'total_price' => $newTotalPrice
-            ],
-            'price_difference' => $priceDiff,
-            'changed_by' => Auth::id(),
-            'notes' => 'Pembatalan item layanan oleh admin'
-        ]);
-
-        AuditLog::log('update', 'Reservasi Item', "Cancelled item {$itemId} from booking REF: {$booking->booking_ref}");
-
-        return response()->json([
-            'message' => 'Item cancelled successfully',
-            'booking' => $booking->fresh(['items'])
-        ]);
+        abort(404, "Booking item not found (ID: {$itemId} for Booking: {$id})");
     }
+
+    $booking = $item->booking;
+
+    $oldTotalPrice = $booking->total_price;
+    $oldItems = $booking->items->toArray();
+
+    $item->update([
+        'status' => 'cancelled',
+        'cancellation_reason' => $request->reason ?? 'Cancelled by admin'
+    ]);
+
+    // Void komisi untuk item ini
+    \App\Models\StaffCommission::where('booking_id', $booking->id)
+        ->where('item_id', $item->service_id)
+        ->where('item_type', 'service')
+        ->delete();
+
+    $this->recalculateBooking($booking);
+
+    $newTotalPrice = $booking->total_price;
+    $priceDiff = $newTotalPrice - $oldTotalPrice;
+
+    BookingAgendaLog::create([
+        'booking_id'       => $booking->id,
+        'booking_item_id'  => $item->id,
+        'action'           => 'cancel_item',
+        'old_data'         => ['items' => $oldItems, 'total_price' => $oldTotalPrice],
+        'new_data'         => ['cancelled_item_id' => $item->id, 'total_price' => $newTotalPrice],
+        'price_difference' => $priceDiff,
+        'changed_by'       => Auth::id(),
+        'notes'            => 'Pembatalan item layanan oleh admin'
+    ]);
+
+    AuditLog::log('update', 'Reservasi Item', "Cancelled item {$itemId} from booking REF: {$booking->booking_ref}");
+
+    return response()->json([
+        'message' => 'Item cancelled successfully',
+        'booking' => $booking->fresh(['items'])
+    ]);
+}
 
    public function rescheduleItem(Request $request, $id, $itemId)
 {
@@ -1423,7 +1426,8 @@ class BookingController extends Controller
         ]);
     }
 
-  public function refundItem(Request $request, $id, $itemId)
+
+public function refundItem(Request $request, $id, $itemId)
 {
     $validator = Validator::make($request->all(), [
         'refund_amount' => 'required|numeric|min:1',
@@ -1435,7 +1439,6 @@ class BookingController extends Controller
         return response()->json(['errors' => $validator->errors()], 422);
     }
 
-    // Cari item — fallback ke processRefund kalau legacy (itemId == bookingId)
     $item = \App\Models\BookingItem::where('booking_id', $id)
         ->where('id', $itemId)
         ->first();
@@ -1453,26 +1456,20 @@ class BookingController extends Controller
         return response()->json(['error' => 'Booking tidak ditemukan'], 404);
     }
 
-    // Hanya boleh refund kalau sudah ada pembayaran
     if (!in_array($booking->payment_status, ['paid', 'partial'])) {
         return response()->json([
             'error' => 'Refund hanya bisa dilakukan untuk booking yang sudah dibayar (paid/partial).'
         ], 422);
     }
 
-    // Hitung nilai item
     $itemServicePrice = (float) ($item->price ?? $item->service_price ?? 0);
     $itemRoomCharge   = (float) ($item->room_charge ?? 0);
     $itemTotal        = $itemServicePrice + $itemRoomCharge;
-
-    // Kurangi yang sudah pernah direfund di item ini
-    $alreadyRefunded = (float) ($item->refund_amount ?? 0);
-    $maxRefund       = $itemTotal - $alreadyRefunded;
+    $alreadyRefunded  = (float) ($item->refund_amount ?? 0);
+    $maxRefund        = $itemTotal - $alreadyRefunded;
 
     if ($maxRefund <= 0) {
-        return response()->json([
-            'error' => 'Item ini sudah pernah di-refund penuh.'
-        ], 422);
+        return response()->json(['error' => 'Item ini sudah pernah di-refund penuh.'], 422);
     }
 
     $requestedAmount = (float) $request->refund_amount;
@@ -1483,37 +1480,35 @@ class BookingController extends Controller
         ], 422);
     }
 
-    // Snapshot sebelum perubahan
     $oldItems      = $booking->items->toArray();
     $oldTotalPrice = (float) $booking->total_price;
 
-    // Update status item
     $item->status              = 'refunded';
     $item->refund_amount       = $alreadyRefunded + $requestedAmount;
     $item->cancellation_reason = $request->reason ?? 'Refund oleh admin';
     $item->save();
 
-    // Akumulasi refund_amount di booking utama
+    // Void komisi untuk item yang direfund
+    \App\Models\StaffCommission::where('booking_id', $booking->id)
+        ->where('item_id', $item->service_id)
+        ->where('item_type', 'service')
+        ->delete();
+
     $booking->refund_amount = ((float) ($booking->refund_amount ?? 0)) + $requestedAmount;
     $booking->save();
 
-    // Recalculate booking
     $this->recalculateBooking($booking);
     $booking->refresh();
 
     $newTotalPrice = (float) $booking->total_price;
     $priceDiff     = $newTotalPrice - $oldTotalPrice;
 
-    // Log agenda
     try {
         BookingAgendaLog::create([
             'booking_id'       => $booking->id,
             'booking_item_id'  => $item->id,
             'action'           => 'refund_item',
-            'old_data'         => [
-                'items'       => $oldItems,
-                'total_price' => $oldTotalPrice,
-            ],
+            'old_data'         => ['items' => $oldItems, 'total_price' => $oldTotalPrice],
             'new_data'         => [
                 'refunded_item_id' => $item->id,
                 'refund_amount'    => $requestedAmount,
@@ -1528,7 +1523,6 @@ class BookingController extends Controller
         \Log::warning("Gagal catat agenda log refund: " . $e->getMessage());
     }
 
-    // Catat transaksi refund
     try {
         \App\Models\Transaction::create([
             'booking_id'       => $booking->id,
@@ -1549,7 +1543,6 @@ class BookingController extends Controller
         \Log::warning("Gagal catat transaksi refund: " . $e->getMessage());
     }
 
-    // Notif WA/Email — wrapped try/catch agar tidak block response
     try {
         $customer = $booking->user;
         $phone    = $customer?->phone ?? $booking->guest_phone ?? null;
@@ -1583,6 +1576,7 @@ class BookingController extends Controller
         'booking'       => $booking->fresh(['items', 'payments']),
     ]);
 }
+
 
 private function recalculateBooking(Booking $booking)
 {

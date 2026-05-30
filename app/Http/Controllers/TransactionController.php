@@ -425,66 +425,56 @@ class TransactionController extends Controller
         }
     }
 
-    private function createCommissionForSingleItem(Transaction $transaction, TransactionItem $item)
-    {
-        $therapist = $item->therapist ?: \App\Models\Therapist::find($item->therapist_id);
-        if (!$therapist)
-            return;
+private function createCommissionForSingleItem($booking, $therapist, $service, $itemPrice)
+{
+    if (!$therapist || !$service) return;
 
-        // Base price is the line item price (unit price)
-        $unitPrice = (float) $item->price;
-        $lineSubtotal = (float) $item->subtotal;
-        $type = $item->type; // 'service' or 'product'
+    $commRule = $therapist->getCommissionForService($service->id);
 
-        $commRule = $therapist->getCommissionForService($item->service_id ?: $item->product_id, $type);
+    $settings = \App\Models\CompanySettings::where('branch_id', $booking->branch_id)->first()
+        ?? \App\Models\CompanySettings::whereNull('branch_id')->first();
 
-        // Fetch company settings
-        $settings = \App\Models\CompanySettings::where('branch_id', $transaction->branch_id)->first()
-            ?? \App\Models\CompanySettings::whereNull('branch_id')->first();
+    $calculateBeforeDiscount = $settings && $settings->commission_before_discount;
 
-        $calculateBeforeDiscount = $settings && $settings->commission_before_discount;
-        $calculateAfterDiscount = $settings && $settings->commission_after_discount;
+    $basePrice = $itemPrice;
+    if (!$calculateBeforeDiscount) {
+        $transaction = $booking->transaction;
+        if ($transaction) {
+            $totalSubtotal = (float) $transaction->subtotal;
+            $totalDiscount = (float) $transaction->discount + (float) ($transaction->promo_amount ?? 0);
 
-        // Apply Discount Logic (proportional)
-        if (!$calculateBeforeDiscount && ($calculateAfterDiscount || !$settings)) {
-            if ($transaction->discount > 0 && $transaction->subtotal > 0) {
-                // Calculate proportional discount for this entire line item
-                $totalSubtotal = (float) $transaction->subtotal;
-                $ratio = $lineSubtotal / $totalSubtotal;
-                $discountShare = (float) $transaction->discount * $ratio;
-
-                $lineSubtotal -= $discountShare;
-                if ($lineSubtotal < 0)
-                    $lineSubtotal = 0;
+            if ($totalDiscount > 0 && $totalSubtotal > 0) {
+                $ratio = $basePrice / $totalSubtotal;
+                $discountShare = $totalDiscount * $ratio;
+                $basePrice = max(0, $basePrice - $discountShare);
             }
-        }
-
-        $amount = 0;
-        if ($commRule['type'] === 'percent') {
-            $amount = $lineSubtotal * ($commRule['rate'] / 100);
-        } else {
-            $amount = $commRule['rate'] * $item->quantity;
-        }
-
-        if ($amount > 0) {
-            \App\Models\StaffCommission::create([
-                'staff_id' => $therapist->id,
-                'branch_id' => $transaction->branch_id,
-                'transaction_id' => $transaction->id,
-                'booking_id' => $transaction->booking_id,
-                'item_id' => $item->service_id ?: $item->product_id,
-                'item_type' => $type,
-                'item_name' => $item->service ? $item->service->name : ($item->product ? $item->product->name : 'Item'),
-                'sales_amount' => $lineSubtotal,
-                'qty' => $item->quantity,
-                'commission_percentage' => ($commRule['type'] === 'percent') ? $commRule['rate'] : 0,
-                'commission_amount' => $amount,
-                'payment_date' => $transaction->transaction_date ?: \Carbon\Carbon::now(),
-                'status' => 'pending',
-            ]);
         }
     }
 
+    $amount = 0;
+    if ($commRule['type'] === 'percent') {
+        $amount = $basePrice * ($commRule['rate'] / 100);
+    } else {
+        $amount = $commRule['rate'];
+    }
+
+    if ($amount > 0) {
+        \App\Models\StaffCommission::create([
+            'staff_id'              => $therapist->id,
+            'branch_id'             => $booking->branch_id,
+            'booking_id'            => $booking->id,
+            'item_id'               => $service->id,
+            'item_type'             => 'service',
+            'item_name'             => $service->name,
+            'sales_amount'          => $basePrice,
+            'qty'                   => 1,
+            'commission_percentage' => ($commRule['type'] === 'percent') ? $commRule['rate'] : 0,
+            'commission_amount'     => $amount,
+            'payment_date'          => \Carbon\Carbon::now(),
+            'status'                => 'pending',
+        ]);
+    }
+}
     private function recordProductSale($transaction, $productId, $variantId, $quantity)
     {
         $branchId = $transaction->branch_id;

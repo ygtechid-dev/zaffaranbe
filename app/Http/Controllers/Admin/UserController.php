@@ -16,12 +16,18 @@ class UserController extends Controller
         $query = User::with(['therapist', 'branch'])->where('role', '!=', 'customer');
 
         if ($request->has('branch_id') && $request->branch_id != 'all' && $request->branch_id != '') {
-            $query->where('branch_id', $request->branch_id);
+            $query->where(function ($q) use ($request) {
+                $q->where('branch_id', $request->branch_id)
+                    ->orWhereNull('branch_id');
+            });
         } else {
             // If not super_admin/owner, restrict to own branch
             $user = auth()->user();
             if ($user && !in_array(strtolower($user->role), ['super_admin', 'owner', 'admin']) && $user->branch_id) {
-                $query->where('branch_id', $user->branch_id);
+                $query->where(function ($q) use ($user) {
+                    $q->where('branch_id', $user->branch_id)
+                        ->orWhereNull('branch_id');
+                });
             }
         }
 
@@ -81,6 +87,7 @@ class UserController extends Controller
             'email' => $email,
             'phone' => $phone,
             'role' => $request->role,
+            'branch_id' => $request->branch_id,
             'staff_id' => $request->staff_id,
             'password' => Hash::make($request->password),
             'is_verified' => true,

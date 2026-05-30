@@ -895,13 +895,21 @@ class PaymentService
                         if ($therapist && $therapist->phone) {
                             try {
                                 // Create a mock object for the notification service
-                                $mockBooking = (object) [
-                                    'booking_date' => $booking->booking_date,
-                                    'start_time' => $item['start_time'],
-                                    'user' => $booking->user,
-                                    'therapist' => $therapist,
-                                    'service' => (object) ['name' => $item['service_name'] ?? ($booking->service->name ?? 'Treatment')]
-                                ];
+                             $mockBooking = (object) [
+    'booking_date'  => $booking->booking_date,
+    'start_time'    => $item['start_time'],
+    'end_time'      => $item['end_time'] ?? null,
+    'booking_ref'   => $booking->booking_ref ?? null,
+    'branch_id'     => $booking->branch_id ?? null,
+    'branch'        => $booking->branch ?? null,
+    'user'          => $booking->user ?? null,
+    'therapist'     => $therapist,
+    'therapist_id'  => $therapist->id ?? null,
+    'service'       => (object) ['name' => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment')],
+    'service_id'    => $item['service_id'] ?? null,
+    'guest_name'    => $item['guest_name'] ?? null,
+    'items'         => null,
+];
                                 $this->whatsappService->sendStaffBookingNotification($therapist->phone, $mockBooking);
                             } catch (\Exception $e) {
                                 Log::error("Failed to notify staff via WhatsApp for item $index: " . $e->getMessage());
@@ -920,13 +928,15 @@ $guestPhone = $item['guest_phone'] ?? null;
 if ($guestPhone) {
     try {
         $this->whatsappService->sendBookingSuccess($guestPhone, [
-            'customer_name' => $item['guest_name'] ?? 'Tamu',
-            'branch_name'   => $booking->branch->name ?? 'Naqupos Spa',
-            'branch_id'     => $booking->branch_id,
-            'date'          => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
-            'time'          => substr($item['start_time'], 0, 5) . ' WIB',
-            'service'       => $item['service_name'] ?? ($booking->service->name ?? 'Treatment'),
-            'location'      => $booking->branch->address ?? ($booking->branch->name ?? ''),
+            'customer_name'  => $item['guest_name'] ?? 'Tamu',
+            'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
+            'branch_id'      => $booking->branch_id,
+            'booking_ref'    => $booking->booking_ref ?? '-',
+            'therapist_name' => $therapist->name ?? '-',
+            'date'           => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
+            'time'           => substr($item['start_time'], 0, 5) . ' WIB',
+            'service'        => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment'),
+            'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
         ]);
     } catch (\Exception $e) {
         Log::error("Failed to notify guest phone for item $index: " . $e->getMessage());
@@ -942,14 +952,16 @@ if ($guestPhone) {
                     $phone = $booking->user ? $booking->user->phone : ($data['customer_phone'] ?? null);
                     if ($phone) {
                         try {
-                            $this->whatsappService->sendBookingSuccess($phone, [
-                                'customer_name' => $booking->user->name ?? ($data['customer_name'] ?? 'Pelanggan'),
-                                'branch_name' => $booking->branch->name ?? 'Naqupos Spa',
-                                'date' => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
-                                'time' => substr($booking->start_time, 0, 5) . ' WIB',
-                                'service' => ($items[0]['service_name'] ?? $booking->service->name ?? 'Treatment') . (count($items) > 1 ? ' (' . count($items) . ' Guests)' : ''),
-                                'location' => $booking->branch->address ?? ($booking->branch->name ?? '')
-                            ]);
+                           $this->whatsappService->sendBookingSuccess($phone, [
+    'customer_name' => $booking->user->name ?? ($data['customer_name'] ?? 'Pelanggan'),
+    'branch_name'   => $booking->branch->name ?? 'Naqupos Spa',
+    'branch_id'     => $booking->branch_id,
+    'booking_ref'   => $booking->booking_ref ?? '-',
+    'date'          => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
+    'time'          => substr($booking->start_time, 0, 5) . ' WIB',
+    'service'       => ($items[0]['service_name'] ?? $booking->service->name ?? 'Treatment') . (count($items) > 1 ? ' (' . count($items) . ' Guests)' : ''),
+    'location'      => $booking->branch->address ?? ($booking->branch->name ?? ''),
+]);
                         } catch (\Exception $e) {
                             Log::error("Failed to notify customer: " . $e->getMessage());
                         }
