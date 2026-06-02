@@ -144,7 +144,7 @@ class TherapistController extends Controller
             if (!file_exists($uploadPath)) {
                 mkdir($uploadPath, 0755, true);
             }
-            $path = $file->move($uploadPath, $filename);
+            $file->move($uploadPath, $filename);
 
             $photoUrl = '/uploads/therapists/' . $filename;
             $therapist->update(['photo' => $photoUrl]);
@@ -384,60 +384,64 @@ class TherapistController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        DB::transaction(function () use ($request, $id, $therapist) {
-            // Update default commissions
-            $therapist->update([
-                'default_service_commission' => $request->input('default_service_commission', 0),
-                'default_product_commission' => $request->input('default_product_commission', 0),
-                'service_commission_type' => $request->input('service_commission_type', $request->input('commission_type', 'percent')),
-                'product_commission_type' => $request->input('product_commission_type', $request->input('commission_type', 'percent')),
-                'commission_type' => $request->input('commission_type', 'percent'),
-            ]);
+        // Update default commissions
+        $therapist->update([
+            'default_service_commission' => $request->input('default_service_commission', 0),
+            'default_product_commission' => $request->input('default_product_commission', 0),
+            'service_commission_type' => $request->input('service_commission_type', $request->input('commission_type', 'percent')),
+            'product_commission_type' => $request->input('product_commission_type', $request->input('commission_type', 'percent')),
+            'commission_type' => $request->input('commission_type', 'percent'),
+        ]);
 
-            // Update service-specific commissions
-            if ($request->has('service_commissions')) {
-                // Force delete — bypass soft delete agar tidak conflict unique constraint
-                DB::table('therapist_commissions')
-                    ->where('therapist_id', $id)
-                    ->where('type', 'service')
-                    ->delete();
+        $now = date('Y-m-d H:i:s');
 
-                foreach ($request->service_commissions as $commission) {
-                    DB::table('therapist_commissions')->insert([
-                        'therapist_id' => $id,
-                        'service_id' => $commission['service_id'],
-                        'service_variant_id' => $commission['service_variant_id'] ?? null,
-                        'type' => 'service',
-                        'commission_rate' => $commission['commission_rate'],
-                        'commission_type' => $commission['commission_type'],
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
+        // Update service-specific commissions
+        if ($request->has('service_commissions')) {
+            // Pakai raw SQL DELETE untuk bypass soft delete & langsung hapus semua
+            DB::statement('DELETE FROM therapist_commissions WHERE therapist_id = ? AND type = ?', [$id, 'service']);
+
+            $serviceRows = [];
+            foreach ($request->service_commissions as $commission) {
+                $serviceRows[] = [
+                    'therapist_id' => (int) $id,
+                    'service_id' => (int) $commission['service_id'],
+                    'service_variant_id' => isset($commission['service_variant_id']) ? (int) $commission['service_variant_id'] : null,
+                    'type' => 'service',
+                    'commission_rate' => (float) $commission['commission_rate'],
+                    'commission_type' => $commission['commission_type'],
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
             }
 
-            // Update product-specific commissions
-            if ($request->has('product_commissions')) {
-                // Force delete — bypass soft delete
-                DB::table('therapist_commissions')
-                    ->where('therapist_id', $id)
-                    ->where('type', 'product')
-                    ->delete();
-
-                foreach ($request->product_commissions as $commission) {
-                    DB::table('therapist_commissions')->insert([
-                        'therapist_id' => $id,
-                        'product_id' => $commission['product_id'] ?? null,
-                        'product_variant_id' => $commission['product_variant_id'] ?? null,
-                        'type' => 'product',
-                        'commission_rate' => $commission['commission_rate'],
-                        'commission_type' => $commission['commission_type'],
-                        'created_at' => now(),
-                        'updated_at' => now(),
-                    ]);
-                }
+            if (!empty($serviceRows)) {
+                DB::table('therapist_commissions')->insert($serviceRows);
             }
-        });
+        }
+
+        // Update product-specific commissions
+        if ($request->has('product_commissions')) {
+            // Pakai raw SQL DELETE untuk bypass soft delete
+            DB::statement('DELETE FROM therapist_commissions WHERE therapist_id = ? AND type = ?', [$id, 'product']);
+
+            $productRows = [];
+            foreach ($request->product_commissions as $commission) {
+                $productRows[] = [
+                    'therapist_id' => (int) $id,
+                    'product_id' => isset($commission['product_id']) ? (int) $commission['product_id'] : null,
+                    'product_variant_id' => isset($commission['product_variant_id']) ? (int) $commission['product_variant_id'] : null,
+                    'type' => 'product',
+                    'commission_rate' => (float) $commission['commission_rate'],
+                    'commission_type' => $commission['commission_type'],
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+
+            if (!empty($productRows)) {
+                DB::table('therapist_commissions')->insert($productRows);
+            }
+        }
 
         return response()->json([
             'message' => 'Commission settings saved successfully',
