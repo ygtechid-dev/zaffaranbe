@@ -7,6 +7,7 @@ use App\Models\Therapist;
 use App\Models\TherapistSchedule;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 
 class TherapistController extends Controller
 {
@@ -27,7 +28,6 @@ class TherapistController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('name', 'like', "%$search%")
                     ->orWhere('phone', 'like', "%$search%");
-                // ->orWhere('phone', 'like', "%$search%");
             });
         }
 
@@ -129,7 +129,7 @@ class TherapistController extends Controller
         $therapist = Therapist::findOrFail($id);
 
         $validator = Validator::make($request->all(), [
-            'photo' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120', // 5MB max
+            'photo' => 'required|image|mimes:jpeg,png,jpg,gif|max:5120',
         ]);
 
         if ($validator->fails()) {
@@ -140,14 +140,12 @@ class TherapistController extends Controller
             $file = $request->file('photo');
             $filename = 'therapist_' . $id . '_' . time() . '.' . $file->getClientOriginalExtension();
 
-            // Store in public/uploads/therapists directory
             $uploadPath = base_path('public/uploads/therapists');
             if (!file_exists($uploadPath)) {
                 mkdir($uploadPath, 0755, true);
             }
             $path = $file->move($uploadPath, $filename);
 
-            // Update therapist with photo path
             $photoUrl = '/uploads/therapists/' . $filename;
             $therapist->update(['photo' => $photoUrl]);
 
@@ -190,7 +188,6 @@ class TherapistController extends Controller
         $date = $request->date;
         $dayOfWeek = $request->day_of_week;
 
-        // Find potential overlaps to perform UPSERT
         $query = TherapistSchedule::where('therapist_id', $id);
         if ($date) {
             $query->where(function ($q) use ($date, $dayOfWeek) {
@@ -204,7 +201,6 @@ class TherapistController extends Controller
 
         $existingSchedules = $query->get();
 
-        // Match by time overlap
         $overlapping = $existingSchedules->filter(function ($s) use ($request) {
             $newStart = $request->start_time;
             $newEnd = $request->end_time;
@@ -214,7 +210,6 @@ class TherapistController extends Controller
         if ($overlapping->isNotEmpty()) {
             $target = $overlapping->first();
 
-            // Delete others to clear the way
             foreach ($overlapping as $other) {
                 if ($other->id !== $target->id) {
                     $other->delete();
@@ -275,7 +270,6 @@ class TherapistController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Check for overlaps with OTHER records after this update
         $newDate = $request->input('date', $schedule->date);
         $newDay = $request->input('day_of_week', $schedule->day_of_week);
         $newStart = $request->input('start_time', $schedule->start_time);
@@ -294,7 +288,6 @@ class TherapistController extends Controller
                 return ($newStart < $s->end_time && $newEnd > $s->start_time);
             });
 
-        // Cleanup conflicts
         foreach ($conflicts as $c) {
             $c->delete();
         }
@@ -333,7 +326,7 @@ class TherapistController extends Controller
             'service_commissions' => $therapist->commissions->where('type', 'service')->map(function ($c) {
                 return [
                     'service_id' => $c->service_id,
-                      'service_variant_id' => $c->service_variant_id, // ← tambah
+                    'service_variant_id' => $c->service_variant_id,
                     'service_name' => $c->service ? $c->service->name : null,
                     'commission_rate' => $c->commission_rate,
                     'commission_type' => $c->commission_type,
@@ -391,47 +384,60 @@ class TherapistController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        // Update default commissions
-        $therapist->update([
-            'default_service_commission' => $request->input('default_service_commission', 0),
-            'default_product_commission' => $request->input('default_product_commission', 0),
-            'service_commission_type' => $request->input('service_commission_type', $request->input('commission_type', 'percent')),
-            'product_commission_type' => $request->input('product_commission_type', $request->input('commission_type', 'percent')),
-            'commission_type' => $request->input('commission_type', 'percent'),
-        ]);
+        DB::transaction(function () use ($request, $id, $therapist) {
+            // Update default commissions
+            $therapist->update([
+                'default_service_commission' => $request->input('default_service_commission', 0),
+                'default_product_commission' => $request->input('default_product_commission', 0),
+                'service_commission_type' => $request->input('service_commission_type', $request->input('commission_type', 'percent')),
+                'product_commission_type' => $request->input('product_commission_type', $request->input('commission_type', 'percent')),
+                'commission_type' => $request->input('commission_type', 'percent'),
+            ]);
 
-        // Update service-specific commissions
-        if ($request->has('service_commissions')) {
-            // Clear existing service commissions
-            $therapist->commissions()->where('type', 'service')->delete();
-foreach ($request->service_commissions as $commission) {
-    \App\Models\TherapistCommission::create([
-        'therapist_id' => $id,
-        'service_id' => $commission['service_id'],
-        'service_variant_id' => $commission['service_variant_id'] ?? null, // ← tambah
-        'type' => 'service',
-        'commission_rate' => $commission['commission_rate'],
-        'commission_type' => $commission['commission_type'],
-    ]);
-}
-        }
+            // Update service-specific commissions
+            if ($request->has('service_commissions')) {
+                // Force delete — bypass soft delete agar tidak conflict unique constraint
+                DB::table('therapist_commissions')
+                    ->where('therapist_id', $id)
+                    ->where('type', 'service')
+                    ->delete();
 
-        // Update product-specific commissions
-        if ($request->has('product_commissions')) {
-            // Clear existing product commissions
-            $therapist->commissions()->where('type', 'product')->delete();
-
-            foreach ($request->product_commissions as $commission) {
-                \App\Models\TherapistCommission::create([
-                    'therapist_id' => $id,
-                    'product_id' => $commission['product_id'] ?? null,
-                    'product_variant_id' => $commission['product_variant_id'] ?? null,
-                    'type' => 'product',
-                    'commission_rate' => $commission['commission_rate'],
-                    'commission_type' => $commission['commission_type'],
-                ]);
+                foreach ($request->service_commissions as $commission) {
+                    DB::table('therapist_commissions')->insert([
+                        'therapist_id' => $id,
+                        'service_id' => $commission['service_id'],
+                        'service_variant_id' => $commission['service_variant_id'] ?? null,
+                        'type' => 'service',
+                        'commission_rate' => $commission['commission_rate'],
+                        'commission_type' => $commission['commission_type'],
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
             }
-        }
+
+            // Update product-specific commissions
+            if ($request->has('product_commissions')) {
+                // Force delete — bypass soft delete
+                DB::table('therapist_commissions')
+                    ->where('therapist_id', $id)
+                    ->where('type', 'product')
+                    ->delete();
+
+                foreach ($request->product_commissions as $commission) {
+                    DB::table('therapist_commissions')->insert([
+                        'therapist_id' => $id,
+                        'product_id' => $commission['product_id'] ?? null,
+                        'product_variant_id' => $commission['product_variant_id'] ?? null,
+                        'type' => 'product',
+                        'commission_rate' => $commission['commission_rate'],
+                        'commission_type' => $commission['commission_type'],
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+            }
+        });
 
         return response()->json([
             'message' => 'Commission settings saved successfully',
