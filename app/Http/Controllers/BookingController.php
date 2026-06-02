@@ -40,6 +40,8 @@ class BookingController extends Controller
             'branch_id' => 'required|exists:branches,id',
             'booking_date' => 'required|date|after_or_equal:today',
             'duration' => 'required|integer|min:1',
+            'service_id' => 'nullable|exists:services,id',
+
         ]);
 
         if ($validator->fails()) {
@@ -144,6 +146,12 @@ class BookingController extends Controller
         $therapists = Therapist::where('branch_id', $branchId)
             ->where('is_active', true)
             ->where('is_booking_online_enabled', true)
+            ->when($request->service_id, function ($q) use ($request) {
+    $q->whereHas('commissions', function ($q2) use ($request) {
+        $q2->where('type', 'service')
+           ->where('service_id', $request->service_id);
+    });
+})
             ->where(function ($q) use ($date) {
                 // Check start/end work dates
                 $q->where(function ($q2) use ($date) {
