@@ -333,6 +333,7 @@ class TherapistController extends Controller
             'service_commissions' => $therapist->commissions->where('type', 'service')->map(function ($c) {
                 return [
                     'service_id' => $c->service_id,
+                      'service_variant_id' => $c->service_variant_id, // ← tambah
                     'service_name' => $c->service ? $c->service->name : null,
                     'commission_rate' => $c->commission_rate,
                     'commission_type' => $c->commission_type,
@@ -375,6 +376,7 @@ class TherapistController extends Controller
             'product_commission_type' => 'nullable|in:percent,fixed',
             'commission_type' => 'nullable|in:percent,fixed',
             'service_commissions' => 'nullable|array',
+            'service_commissions.*.service_variant_id' => 'nullable|exists:service_variants,id',
             'service_commissions.*.service_id' => 'required|exists:services,id',
             'service_commissions.*.commission_rate' => 'required|numeric|min:0',
             'service_commissions.*.commission_type' => 'required|in:percent,fixed',
@@ -402,16 +404,16 @@ class TherapistController extends Controller
         if ($request->has('service_commissions')) {
             // Clear existing service commissions
             $therapist->commissions()->where('type', 'service')->delete();
-
-            foreach ($request->service_commissions as $commission) {
-                \App\Models\TherapistCommission::create([
-                    'therapist_id' => $id,
-                    'service_id' => $commission['service_id'],
-                    'type' => 'service',
-                    'commission_rate' => $commission['commission_rate'],
-                    'commission_type' => $commission['commission_type'],
-                ]);
-            }
+foreach ($request->service_commissions as $commission) {
+    \App\Models\TherapistCommission::create([
+        'therapist_id' => $id,
+        'service_id' => $commission['service_id'],
+        'service_variant_id' => $commission['service_variant_id'] ?? null, // ← tambah
+        'type' => 'service',
+        'commission_rate' => $commission['commission_rate'],
+        'commission_type' => $commission['commission_type'],
+    ]);
+}
         }
 
         // Update product-specific commissions

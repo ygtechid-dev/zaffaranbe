@@ -34,372 +34,272 @@ class BookingController extends Controller
     /**
      * Get available slots grouped by therapist
      */
-    public function getTherapistAvailability(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'branch_id' => 'required|exists:branches,id',
-            'booking_date' => 'required|date|after_or_equal:today',
-            'duration' => 'required|integer|min:1',
-            'service_id' => 'nullable|exists:services,id',
+public function getTherapistAvailability(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'branch_id' => 'required|exists:branches,id',
+        'booking_date' => 'required|date|after_or_equal:today',
+        'duration' => 'required|integer|min:1',
+        'service_id' => 'nullable|exists:services,id',
+        'variant_id' => 'nullable|exists:service_variants,id',
+    ]);
 
-        ]);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
+    }
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
+    $branchId = $request->branch_id;
+    $date = $request->booking_date;
+    $duration = $request->duration;
+    $dayOfWeek = strtolower(Carbon::parse($date)->format('l'));
+
+    $branch = \App\Models\Branch::findOrFail($branchId);
+    $settings = \App\Models\CompanySettings::where('branch_id', $branchId)->first();
+
+    $openingTime = $branch->opening_time;
+    $closingTime = $branch->closing_time;
+    $isClosed = false;
+
+    $dayOfWeekMap = [
+        'monday' => 'Senin', 'tuesday' => 'Selasa', 'wednesday' => 'Rabu',
+        'thursday' => 'Kamis', 'friday' => 'Jumat', 'saturday' => 'Sabtu', 'sunday' => 'Minggu'
+    ];
+    $targetDayName = $dayOfWeekMap[$dayOfWeek] ?? null;
+    $useSpecific = $settings ? ($settings->use_specific_operating_hours ?? false) : false;
+    $operatingDays = $settings ? $settings->operating_days : $branch->operating_days;
+
+    if ($useSpecific && !empty($operatingDays)) {
+        $isFound = false;
+        foreach ($operatingDays as $dayConfig) {
+            $dayName = is_array($dayConfig) ? ($dayConfig['day'] ?? '') : $dayConfig;
+            if ($dayName === $targetDayName) {
+                $isFound = true;
+                if (is_array($dayConfig)) {
+                    $openingTime = $dayConfig['open'] ?? ($settings->default_open_time ?? $openingTime);
+                    $closingTime = $dayConfig['close'] ?? ($settings->default_close_time ?? $closingTime);
+                    if (isset($dayConfig['active']) && !$dayConfig['active']) {
+                        $isClosed = true;
+                    }
+                }
+                break;
+            }
         }
-
-        $branchId = $request->branch_id;
-        $date = $request->booking_date;
-        $duration = $request->duration;
-        $dayOfWeek = strtolower(Carbon::parse($date)->format('l'));
-
-        // 1. Get Branch Opening Hours and Settings
-        $branch = \App\Models\Branch::findOrFail($branchId);
-        $settings = \App\Models\CompanySettings::where('branch_id', $branchId)->first();
-
-        $openingTime = $branch->opening_time;
-        $closingTime = $branch->closing_time;
-        $isClosed = false;
-
-        $dayOfWeekMap = [
-            'monday' => 'Senin',
-            'tuesday' => 'Selasa',
-            'wednesday' => 'Rabu',
-            'thursday' => 'Kamis',
-            'friday' => 'Jumat',
-            'saturday' => 'Sabtu',
-            'sunday' => 'Minggu'
-        ];
-        $targetDayName = $dayOfWeekMap[$dayOfWeek] ?? null;
-
-        $useSpecific = $settings ? ($settings->use_specific_operating_hours ?? false) : false;
-
-        $operatingDays = $settings ? $settings->operating_days : $branch->operating_days;
-        if ($useSpecific && !empty($operatingDays)) {
+        if (!$isFound) $isClosed = true;
+    } else {
+        $openingTime = $settings->default_open_time ?? $branch->opening_time;
+        $closingTime = $settings->default_close_time ?? $branch->closing_time;
+        if (!empty($operatingDays)) {
             $isFound = false;
             foreach ($operatingDays as $dayConfig) {
-                // Handle both new object format and old string format
                 $dayName = is_array($dayConfig) ? ($dayConfig['day'] ?? '') : $dayConfig;
-
                 if ($dayName === $targetDayName) {
                     $isFound = true;
-                    if (is_array($dayConfig)) {
-                        $openingTime = $dayConfig['open'] ?? ($settings->default_open_time ?? $openingTime);
-                        $closingTime = $dayConfig['close'] ?? ($settings->default_close_time ?? $closingTime);
-                        if (isset($dayConfig['active']) && !$dayConfig['active']) {
-                            $isClosed = true;
-                        }
+                    if (is_array($dayConfig) && isset($dayConfig['active']) && !$dayConfig['active']) {
+                        $isClosed = true;
                     }
                     break;
                 }
             }
-            if (!$isFound) {
-                $isClosed = true;
-            }
-        } else {
-            // Global Mode - use default times from settings or branch
-            $openingTime = $settings->default_open_time ?? $branch->opening_time;
-            $closingTime = $settings->default_close_time ?? $branch->closing_time;
-
-            // Check if today is one of the operating days (even in global mode, we might want to know if it's open)
-            if (!empty($operatingDays)) {
-                $isFound = false;
-                foreach ($operatingDays as $dayConfig) {
-                    $dayName = is_array($dayConfig) ? ($dayConfig['day'] ?? '') : $dayConfig;
-                    if ($dayName === $targetDayName) {
-                        $isFound = true;
-                        // In global mode, if day is in list but explicitly marked inactive in object format
-                        if (is_array($dayConfig) && isset($dayConfig['active']) && !$dayConfig['active']) {
-                            $isClosed = true;
-                        }
-                        break;
-                    }
-                }
-                if (!$isFound)
-                    $isClosed = true;
-            }
+            if (!$isFound) $isClosed = true;
         }
+    }
 
-        if ($isClosed) {
-            return response()->json(['error' => 'Salon tutup pada hari tersebut'], 400);
-        }
+    if ($isClosed) {
+        return response()->json(['error' => 'Salon tutup pada hari tersebut'], 400);
+    }
 
-        if (!$openingTime || !$closingTime) {
-            return response()->json(['error' => 'Branch operating hours not set'], 500);
-        }
+    if (!$openingTime || !$closingTime) {
+        return response()->json(['error' => 'Branch operating hours not set'], 500);
+    }
 
-        $startOfDay = Carbon::parse($date . ' ' . $openingTime);
-        $endOfDay = Carbon::parse($date . ' ' . $closingTime);
+    $startOfDay = Carbon::parse($date . ' ' . $openingTime);
+    $endOfDay = Carbon::parse($date . ' ' . $closingTime);
+    if ($endOfDay->lte($startOfDay)) $endOfDay->addDay();
 
-        // Handle over-midnight closing time (e.g., 09:00 to 03:00)
-        if ($endOfDay->lte($startOfDay)) {
-            $endOfDay->addDay();
-        }
+    $calendarSettings = \App\Models\CalendarSettings::where('branch_id', $branchId)->first()
+        ?? \App\Models\CalendarSettings::whereNull('branch_id')->first();
+    $slotInterval = $calendarSettings ? $calendarSettings->slot_duration : 15;
+    $therapistBufferTime = $calendarSettings ? ($calendarSettings->therapist_buffer_time ?? 15) : 15;
 
-        // Get slot duration and therapist buffer time from calendar settings
-        $calendarSettings = \App\Models\CalendarSettings::where('branch_id', $branchId)->first()
-            ?? \App\Models\CalendarSettings::whereNull('branch_id')->first();
-        $slotInterval = $calendarSettings ? $calendarSettings->slot_duration : 15;
-        $therapistBufferTime = $calendarSettings ? ($calendarSettings->therapist_buffer_time ?? 15) : 15;
-
-        // 2. Get All Active Therapists & Rooms
-        $therapists = Therapist::where('branch_id', $branchId)
-            ->where('is_active', true)
-            ->where('is_booking_online_enabled', true)
-            ->when($request->service_id, function ($q) use ($request) {
-    $q->whereHas('commissions', function ($q2) use ($request) {
-        $q2->where('type', 'service')
-           ->where('service_id', $request->service_id);
-    });
-})
-            ->where(function ($q) use ($date) {
-                // Check start/end work dates
-                $q->where(function ($q2) use ($date) {
-                    $q2->whereNull('start_work_date')
-                        ->orWhere('start_work_date', '<=', $date);
-                })->where(function ($q3) use ($date) {
-                    $q3->whereNull('end_work_date')
-                        ->orWhere('end_work_date', '>=', $date);
-                });
-            })
-            ->with([
-                'schedules' => function ($q) use ($date, $dayOfWeek) {
-                    $q->where('is_active', true)
-                        ->where(function ($q2) use ($date, $dayOfWeek) {
-                            $q2->where('date', $date)
-                                ->orWhere(function ($q3) use ($dayOfWeek) {
-                                    $q3->whereNull('date')->where('day_of_week', $dayOfWeek);
-                                })
-                                ->orWhere(function ($q4) {
-                                    $q4->whereNull('date')->where('day_of_week', 'daily');
-                                });
-                        });
-                }
-            ])
-            ->get();
-
-        $totalRooms = Room::where(function ($q) use ($branchId) {
-            $q->where('branch_id', $branchId)->orWhere('is_global', true);
-        })->where('is_active', true)->get()->sum(function ($room) {
-            return $room->capacity * max(1, $room->quantity ?? 1);
-        });
-
-        // 3. Get All Bookings for that day
-        $bookings = Booking::where('branch_id', $branchId)
-            ->where('booking_date', $date)
-            ->where(function ($q) {
-                $q->where('is_blocked', true)
-                    ->orWhereIn('status', ['confirmed', 'in_progress', 'completed'])
-                    ->orWhere(function ($q2) {
-                        $q2->whereIn('status', ['pending_payment', 'awaiting_payment'])
-                            ->where(function ($q3) {
-                                $q3->whereNull('expires_at')
-                                    ->orWhere('expires_at', '>', Carbon::now());
+    // ── Filter therapist by service + variant skill ───────────────────────────
+    $therapists = Therapist::where('branch_id', $branchId)
+        ->where('is_active', true)
+        ->where('is_booking_online_enabled', true)
+        ->when($request->service_id, function ($q) use ($request) {
+            $q->whereHas('commissions', function ($q2) use ($request) {
+                $q2->where('type', 'service')
+                   ->where('service_id', $request->service_id)
+                   ->when($request->variant_id, function ($q3) use ($request) {
+                       // kalau ada variant_id: harus match variant atau null (artinya bisa semua variant)
+                       $q3->where(function ($q4) use ($request) {
+                           $q4->where('service_variant_id', $request->variant_id)
+                              ->orWhereNull('service_variant_id');
+                       });
+                   });
+            });
+        })
+        ->where(function ($q) use ($date) {
+            $q->where(function ($q2) use ($date) {
+                $q2->whereNull('start_work_date')
+                    ->orWhere('start_work_date', '<=', $date);
+            })->where(function ($q3) use ($date) {
+                $q3->whereNull('end_work_date')
+                    ->orWhere('end_work_date', '>=', $date);
+            });
+        })
+        ->with([
+            'schedules' => function ($q) use ($date, $dayOfWeek) {
+                $q->where('is_active', true)
+                    ->where(function ($q2) use ($date, $dayOfWeek) {
+                        $q2->where('date', $date)
+                            ->orWhere(function ($q3) use ($dayOfWeek) {
+                                $q3->whereNull('date')->where('day_of_week', $dayOfWeek);
+                            })
+                            ->orWhere(function ($q4) {
+                                $q4->whereNull('date')->where('day_of_week', 'daily');
                             });
                     });
-            })
-            ->with([
-                'items' => function ($q) {
-                    // Ignore cancelled items
-                    $q->whereNotIn('status', ['cancelled']);
-                }
-            ])
-            ->get();
-
-
-        // 4. Build Room Usage Map (Minute by Minute)
-        // Array of size 1440 (minutes in a day)
-        $roomUsage = array_fill(0, 1440, 0);
-
-        foreach ($bookings as $b) {
-            $bookingDate = $b->booking_date instanceof \Carbon\Carbon
-                ? $b->booking_date->toDateString()
-                : $b->booking_date;
-
-            $itemsToProcess = [];
-            if ($b->items && $b->items->count() > 0) {
-                foreach ($b->items as $item) {
-                    $itemsToProcess[] = [
-                        'start_time' => $item->start_time,
-                        'end_time' => $item->end_time,
-                    ];
-                }
-            } else {
-                $itemsToProcess[] = [
-                    'start_time' => $b->start_time,
-                    'end_time' => $b->end_time,
-                ];
             }
+        ])
+        ->get();
 
-            foreach ($itemsToProcess as $item) {
-                if (!$item['start_time'] || !$item['end_time'])
-                    continue;
+    $totalRooms = Room::where(function ($q) use ($branchId) {
+        $q->where('branch_id', $branchId)->orWhere('is_global', true);
+    })->where('is_active', true)->get()->sum(function ($room) {
+        return $room->capacity * max(1, $room->quantity ?? 1);
+    });
 
-                $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
-                $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
+    $bookings = Booking::where('branch_id', $branchId)
+        ->where('booking_date', $date)
+        ->where(function ($q) {
+            $q->where('is_blocked', true)
+                ->orWhereIn('status', ['confirmed', 'in_progress', 'completed'])
+                ->orWhere(function ($q2) {
+                    $q2->whereIn('status', ['pending_payment', 'awaiting_payment'])
+                        ->where(function ($q3) {
+                            $q3->whereNull('expires_at')
+                                ->orWhere('expires_at', '>', Carbon::now());
+                        });
+                });
+        })
+        ->with(['items' => function ($q) {
+            $q->whereNotIn('status', ['cancelled']);
+        }])
+        ->get();
 
-                // Convert to minutes from midnight
-                $startMin = $bStart->hour * 60 + $bStart->minute;
-                // Include buffer time for room preparation/cleaning
-                $endMin = ($bEnd->hour * 60 + $bEnd->minute) + $therapistBufferTime;
-
-                for ($i = $startMin; $i < $endMin; $i++) {
-                    if (isset($roomUsage[$i])) {
-                        $roomUsage[$i]++;
-                    }
-                }
+    $roomUsage = array_fill(0, 1440, 0);
+    foreach ($bookings as $b) {
+        $bookingDate = $b->booking_date instanceof \Carbon\Carbon
+            ? $b->booking_date->toDateString() : $b->booking_date;
+        $itemsToProcess = [];
+        if ($b->items && $b->items->count() > 0) {
+            foreach ($b->items as $item) {
+                $itemsToProcess[] = ['start_time' => $item->start_time, 'end_time' => $item->end_time];
+            }
+        } else {
+            $itemsToProcess[] = ['start_time' => $b->start_time, 'end_time' => $b->end_time];
+        }
+        foreach ($itemsToProcess as $item) {
+            if (!$item['start_time'] || !$item['end_time']) continue;
+            $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
+            $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
+            $startMin = $bStart->hour * 60 + $bStart->minute;
+            $endMin = ($bEnd->hour * 60 + $bEnd->minute) + $therapistBufferTime;
+            for ($i = $startMin; $i < $endMin; $i++) {
+                if (isset($roomUsage[$i])) $roomUsage[$i]++;
             }
         }
+    }
 
-        // 5. Generate Slots and Check Availability for each Therapist
-        $result = [];
+    $result = [];
+    foreach ($therapists as $therapist) {
+        $schedule = $therapist->schedules->sortByDesc(function ($s) {
+            if ($s->date) return 3;
+            if ($s->day_of_week != 'daily') return 2;
+            return 1;
+        })->first();
 
-        foreach ($therapists as $therapist) {
-            // Determine Priority Schedule: Date > WeekDay > Daily
-            $schedule = $therapist->schedules->sortByDesc(function ($s) {
-                if ($s->date)
-                    return 3;
-                if ($s->day_of_week != 'daily')
-                    return 2;
-                return 1;
-            })->first();
+        if (!$schedule) continue;
 
-            // If no schedule, therapist is not working
-            if (!$schedule) {
-                continue;
+        $availableSlots = [];
+        $shiftStart = Carbon::parse($date . ' ' . $schedule->start_time);
+        $shiftEnd = Carbon::parse($date . ' ' . $schedule->end_time);
+        $current = $shiftStart->copy();
+
+        while ($current->copy()->addMinutes($duration)->lte($shiftEnd)) {
+            $slotStart = $current->copy();
+            $slotEnd = $current->copy()->addMinutes($duration);
+            $slotTimeStr = $slotStart->format('H:i');
+            $current->addMinutes($slotInterval);
+
+            $startMin = $slotStart->hour * 60 + $slotStart->minute;
+            $endMin = $slotEnd->hour * 60 + $slotEnd->minute;
+            $maxUsage = 0;
+            for ($m = $startMin; $m < $endMin; $m++) {
+                if (isset($roomUsage[$m]) && $roomUsage[$m] > $maxUsage) $maxUsage = $roomUsage[$m];
             }
+            $roomAvailable = $maxUsage < $totalRooms;
+            $isPast = $slotStart->lt(Carbon::now());
 
-            $availableSlots = [];
-
-            if ($schedule) {
-                $shiftStart = Carbon::parse($date . ' ' . $schedule->start_time);
-                $shiftEnd = Carbon::parse($date . ' ' . $schedule->end_time);
-
-                // Generate slots every {slotInterval} mins within therapist shift hours (not branch hours)
-                $current = $shiftStart->copy();
-                while ($current->copy()->addMinutes($duration)->lte($shiftEnd)) {
-                    $slotStart = $current->copy();
-                    $slotEnd = $current->copy()->addMinutes($duration);
-                    $slotTimeStr = $slotStart->format('H:i');
-
-                    // Increment for next loop
-                    $current->addMinutes($slotInterval);
-
-                    // Check Room Availability
-                    $startMin = $slotStart->hour * 60 + $slotStart->minute;
-                    $endMin = $slotEnd->hour * 60 + $slotEnd->minute;
-                    $maxUsage = 0;
-                    for ($m = $startMin; $m < $endMin; $m++) {
-                        if (isset($roomUsage[$m]) && $roomUsage[$m] > $maxUsage) {
-                            $maxUsage = $roomUsage[$m];
+            $therapistBusy = false;
+            foreach ($bookings as $b) {
+                $bookingDate = $b->booking_date instanceof \Carbon\Carbon
+                    ? $b->booking_date->toDateString() : $b->booking_date;
+                $itemsToProcess = [];
+                if ($b->items && $b->items->count() > 0) {
+                    foreach ($b->items as $item) {
+                        if ($item->therapist_id == $therapist->id) {
+                            $itemsToProcess[] = ['start_time' => $item->start_time, 'end_time' => $item->end_time];
                         }
                     }
-
-                    $roomAvailable = $maxUsage < $totalRooms;
-
-                    // Check if time is in the past (for today)
-                    $isPast = false;
-                    $now = Carbon::now();
-                    if ($slotStart->lt($now)) {
-                        $isPast = true;
+                } else {
+                    if ($b->therapist_id == $therapist->id) {
+                        $itemsToProcess[] = ['start_time' => $b->start_time, 'end_time' => $b->end_time];
                     }
-
-                    // Check Therapist Booking Conflict (including buffer time for rest)
-                    $therapistBusy = false;
-                    foreach ($bookings as $b) {
-                        $bookingDate = $b->booking_date instanceof \Carbon\Carbon
-                            ? $b->booking_date->toDateString()
-                            : $b->booking_date;
-
-                        $itemsToProcess = [];
-                        if ($b->items && $b->items->count() > 0) {
-                            foreach ($b->items as $item) {
-                                if ($item->therapist_id == $therapist->id) {
-                                    $itemsToProcess[] = [
-                                        'start_time' => $item->start_time,
-                                        'end_time' => $item->end_time,
-                                    ];
-                                }
-                            }
-                        } else {
-                            if ($b->therapist_id == $therapist->id) {
-                                $itemsToProcess[] = [
-                                    'start_time' => $b->start_time,
-                                    'end_time' => $b->end_time,
-                                ];
-                            }
-                        }
-
-                     foreach ($itemsToProcess as $item) {
-    if (!$item['start_time'] || !$item['end_time'])
-        continue;
-
-  $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
-$bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
-
-
-\Log::info('SLOT DEBUG', [
-    'slotStart' => $slotStart->format('H:i'),
-    'bStart' => $bStart->format('H:i'),
-    'bEnd' => $bEnd->format('H:i'),
-    'gte_bStart' => $slotStart->gte($bStart),
-    'lt_bEnd' => $slotStart->lt($bEnd),
-    'busy' => $slotStart->gte($bStart) && $slotStart->lt($bEnd),
-]);
-
-
-
-if ($slotStart->gte($bStart) && $slotStart->lt($bEnd)) {
-    $therapistBusy = true;
-    break 2;
-}
-}
+                }
+                foreach ($itemsToProcess as $item) {
+                    if (!$item['start_time'] || !$item['end_time']) continue;
+                    $bStart = Carbon::parse($bookingDate . ' ' . $item['start_time']);
+                    $bEnd = Carbon::parse($bookingDate . ' ' . $item['end_time']);
+                    if ($slotStart->gte($bStart) && $slotStart->lt($bEnd)) {
+                        $therapistBusy = true;
+                        break 2;
                     }
-
-                    // Determine availability and reason if not available
-                    $isAvailable = !$isPast && !$therapistBusy && $roomAvailable;
-                    $disabledReason = null;
-
-                    if ($isPast) {
-                        $disabledReason = 'Waktu sudah lewat';
-                    } elseif ($therapistBusy) {
-                        $disabledReason = 'Terapis sudah terbooking';
-                    } elseif (!$roomAvailable) {
-                        $disabledReason = 'Ruangan penuh';
-                    }
-
-                    // Add all slots with their availability status
-                    $availableSlots[] = [
-                        'time' => $slotTimeStr,
-                        'available' => $isAvailable,
-                        'disabled' => !$isAvailable,
-                        'reason' => $disabledReason
-                    ];
                 }
             }
 
-            // Build shifts array from schedule
-            $shifts = [];
-            if ($schedule) {
-                $shifts[] = [
-                    'start' => substr($schedule->start_time, 0, 5),
-                    'end' => substr($schedule->end_time, 0, 5)
-                ];
-            }
+            $isAvailable = !$isPast && !$therapistBusy && $roomAvailable;
+            $disabledReason = null;
+            if ($isPast) $disabledReason = 'Waktu sudah lewat';
+            elseif ($therapistBusy) $disabledReason = 'Terapis sudah terbooking';
+            elseif (!$roomAvailable) $disabledReason = 'Ruangan penuh';
 
-            $result[] = [
-                'id' => $therapist->id,
-                'name' => $therapist->name,
-                'photo' => $therapist->photo,
-                'gender' => $therapist->gender,
-                'specialization' => $therapist->specialization,
-                'shifts' => $shifts,
-                'slots' => $availableSlots
+            $availableSlots[] = [
+                'time' => $slotTimeStr,
+                'available' => $isAvailable,
+                'disabled' => !$isAvailable,
+                'reason' => $disabledReason
             ];
         }
 
-        return response()->json($result);
+        $shifts = [[
+            'start' => substr($schedule->start_time, 0, 5),
+            'end' => substr($schedule->end_time, 0, 5)
+        ]];
+
+        $result[] = [
+            'id' => $therapist->id,
+            'name' => $therapist->name,
+            'photo' => $therapist->photo,
+            'gender' => $therapist->gender,
+            'specialization' => $therapist->specialization,
+            'shifts' => $shifts,
+            'slots' => $availableSlots
+        ];
     }
+
+    return response()->json($result);
+}
 
     /**
      * Get available therapists for a specific date, time, and duration
