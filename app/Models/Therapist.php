@@ -32,6 +32,8 @@ class Therapist extends Model
         'product_commission_type',
         'commission_type',
         'is_booking_online_enabled',
+        'is_calendar_enabled',
+
     ];
 
     protected $hidden = [
