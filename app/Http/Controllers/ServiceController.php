@@ -463,46 +463,87 @@ class ServiceController extends Controller
         return response()->json(['error' => 'No image provided'], 400);
     }
 
-    public function getFeatured(Request $request)
-    {
-        $query = \App\Models\Service::with(['serviceCategory', 'variants'])
-            ->where('is_featured', true)
-            ->where('is_active', true);
+public function getFeatured(Request $request)
+{
+    // Service tanpa variant yang is_featured
+    $services = DB::select("
+        SELECT s.*, NULL as variant_id, NULL as variant_name, 
+               s.price as variant_price, s.duration as variant_duration,
+               s.featured_order as sort_order
+        FROM services s
+        WHERE s.is_featured = 1 
+          AND s.is_active = 1
+          AND NOT EXISTS (
+              SELECT 1 FROM service_variants sv 
+              WHERE sv.service_id = s.id
+          )
+        
+        UNION ALL
+        
+        -- Variant yang is_featured
+        SELECT s.*, sv.id as variant_id, sv.name as variant_name,
+               sv.price as variant_price, sv.duration as variant_duration,
+               sv.featured_order as sort_order
+        FROM services s
+        JOIN service_variants sv ON sv.service_id = s.id
+        WHERE sv.is_featured = 1
+          AND s.is_active = 1
+        
+        ORDER BY sort_order ASC
+    ");
 
-        if ($request->has('branch_id')) {
-            $query->where(function ($q) use ($request) {
-                $q->where('branch_id', $request->branch_id)
-                    ->orWhereNull('branch_id');
-            });
-        }
+    return response()->json($services);
+}
 
-        return response()->json(
-            $query->orderBy('featured_order', 'asc')
-                ->orderBy('position', 'asc')
-                ->get()
-        );
+ public function updateFeatured(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'services' => 'required|array',
+        'services.*.id' => 'required|exists:services,id',
+        'services.*.variant_id' => 'nullable|exists:service_variants,id',
+        'services.*.is_featured' => 'required|boolean',
+        'services.*.featured_order' => 'required|integer|min:0',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
 
-    public function updateFeatured(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'services' => 'required|array',
-            'services.*.id' => 'required|exists:services,id',
-            'services.*.is_featured' => 'required|boolean',
-            'services.*.featured_order' => 'required|integer|min:0',
-        ]);
+    foreach ($request->services as $item) {
+        if (!empty($item['variant_id'])) {
+            DB::statement('UPDATE service_variants SET is_featured = ?, featured_order = ? WHERE id = ?', [
+                $item['is_featured'] ? 1 : 0,
+                $item['featured_order'],
+                $item['variant_id']
+            ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        foreach ($request->services as $item) {
-            \App\Models\Service::where('id', $item['id'])->update([
-                'is_featured' => $item['is_featured'],
-                'featured_order' => $item['featured_order'],
+            // Kalau ada variant yang featured, parent service ikut featured
+            if ($item['is_featured']) {
+                DB::statement('UPDATE services SET is_featured = 1 WHERE id = ?', [
+                    $item['id']
+                ]);
+            } else {
+                // Cek apakah masih ada variant lain yang featured
+                $stillHasFeatured = DB::selectOne(
+                    'SELECT COUNT(*) as cnt FROM service_variants WHERE service_id = ? AND is_featured = 1',
+                    [$item['id']]
+                );
+                if ($stillHasFeatured->cnt == 0) {
+                    DB::statement('UPDATE services SET is_featured = 0 WHERE id = ?', [
+                        $item['id']
+                    ]);
+                }
+            }
+        } else {
+            // Service tanpa variant
+            DB::statement('UPDATE services SET is_featured = ?, featured_order = ? WHERE id = ?', [
+                $item['is_featured'] ? 1 : 0,
+                $item['featured_order'],
+                $item['id']
             ]);
         }
-
-        return response()->json(['message' => 'Featured services updated successfully']);
     }
+
+    return response()->json(['message' => 'Featured services updated successfully']);
+}
 }
