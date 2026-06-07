@@ -233,31 +233,7 @@ class PaymentController extends Controller
             );
 
             // Send Notification (Confirmation)
-            if ($result['success'] && isset($result['data']['payment_url'])) {
-                $branchId = $request->branch_id ?? ($booking ? $booking->branch_id : ($paymentLog->booking_data['branch_id'] ?? null));
-                $branch = $branchId ? \App\Models\Branch::find($branchId) : null;
-                $user = auth()->user();
-                $phone = $user->phone ?? ($paymentLog->booking_data['customer_phone'] ?? null);
-
-                if ($phone) {
-                    $finalPaymentAmount = (int) $amount;
-
-                    // Fallback in case property is uninitialized for any reason
-                    if (!isset($this->whatsappService)) {
-                        $this->whatsappService = app(WhatsAppService::class);
-                    }
-
-                    $this->whatsappService->sendCustomerNotification($phone, 'confirmation', [
-                        'customer' => $user,
-                        'customer_name' => $user->name ?? ($paymentLog->booking_data['customer_name'] ?? 'Pelanggan'),
-                        'booking' => $booking,
-                        'branch' => $branch,
-                        'payment_link' => $result['data']['payment_url'],
-                        'dp_amount' => $finalPaymentAmount
-                    ], $branchId);
-                }
-            }
-
+        
             if ($paymentLog) {
                 $result['payment_log_id'] = $paymentLog->id;
             }
