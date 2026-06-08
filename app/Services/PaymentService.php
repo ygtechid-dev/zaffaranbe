@@ -756,270 +756,279 @@ class PaymentService
     /**
      * Process a confirmed successful payment (Create booking, record transaction, notify)
      */
-    public function processSuccessfulPayment(Payment $payment)
-    {
-        Log::info("processSuccessfulPayment starting for Payment ID: {$payment->id}, Status: {$payment->status}");
+   public function processSuccessfulPayment(Payment $payment)
+{
+    Log::info("processSuccessfulPayment starting for Payment ID: {$payment->id}, Status: {$payment->status}");
 
-        if ($payment->status !== 'success') {
-            Log::warning("processSuccessfulPayment early return: status is not success", ['status' => $payment->status]);
-            return;
-        }
-
-        DB::beginTransaction();
-        try {
-            if ($payment->payment_log_id) {
-                $log = $payment->paymentLog;
-                Log::info("Found PaymentLog ID: " . ($log ? $log->id : 'NULL') . " with status: " . ($log ? $log->status : 'N/A'));
-
-                if ($log && $log->status === 'pending') {
-                    $log->update(['status' => 'settlement']);
-                    Log::info("PaymentLog {$log->id} updated to settlement");
-                    $data = $log->booking_data;
-
-                    Log::info("Processing booking data from log", ['data_keys' => array_keys($data)]);
-
-                    if (isset($data['is_pos']) && $data['is_pos']) {
-                        Log::info("Payment is for POS, skipping booking creation");
-                        DB::commit();
-                        return;
-                    }
-
-                    $amountPaid = (float) $payment->amount;
-                    $totalPrice = (float) $data['total_price'];
-                    $paymentStatus = ($data['payment_type'] === 'full_payment' || $amountPaid >= $totalPrice) ? 'paid' : 'partial';
-
-                    $items = isset($data['items']) ? $data['items'] : (isset($data['service_id']) ? [$data] : []);
-                    $firstBooking = null;
-
-                    // Consolidated notes logic
-                    $allNotes = [];
-                    $hasConflict = false;
-                    foreach ($items as $item) {
-                        if (!empty($item['notes'])) {
-                            $allNotes[] = $item['notes'];
-                        }
-
-                        // Check for conflicts for this specific item
-                        $conflict = Booking::where('booking_date', $item['booking_date'])
-                            ->where('therapist_id', $item['therapist_id'])
-                            ->where('start_time', '<', $item['end_time'])
-                            ->where('end_time', '>', $item['start_time'])
-                            ->whereIn('status', ['confirmed', 'in_progress'])
-                            ->exists();
-
-                        if (!$conflict && isset($item['room_id'])) {
-                            $room = Room::find($item['room_id']);
-                            if ($room) {
-                                $existingCount = Booking::where('booking_date', $item['booking_date'])
-                                    ->where('room_id', $item['room_id'])
-                                    ->where('start_time', '<', $item['end_time'])
-                                    ->where('end_time', '>', $item['start_time'])
-                                    ->whereIn('status', ['confirmed', 'in_progress'])
-                                    ->count();
-                                if ($existingCount >= ($room->capacity * max(1, $room->quantity ?? 1))) {
-                                    $conflict = true;
-                                }
-                            }
-                        }
-
-                        if ($conflict) {
-                            $hasConflict = true;
-                        }
-                    }
-
-                    $consolidatedNotes = implode(" | ", array_unique($allNotes));
-                    if ($hasConflict) {
-                        $consolidatedNotes .= ($consolidatedNotes ? " " : "") . "[Overbooked/Conflict]";
-                    }
-
-                    $firstItem = !empty($items) ? $items[0] : null;
-                   $booking = Booking::create([
-    'user_id' => $data['user_id'] ?? null,
-    'branch_id' => $data['branch_id'] ?? null,
-    'service_id' => $firstItem ? ($firstItem['service_id'] ?? null) : null,
-    'therapist_id' => $firstItem ? ($firstItem['therapist_id'] ?? null) : null,
-    'room_id' => $firstItem ? ($firstItem['room_id'] ?? null) : null,
-    'booking_date' => $firstItem ? $firstItem['booking_date'] : ($data['booking_date'] ?? Carbon::now()->toDateString()),
-    'start_time' => $firstItem ? $firstItem['start_time'] : null,
-    'end_time' => $firstItem ? $firstItem['end_time'] : null,
-    'duration' => $data['duration'] ?? ($firstItem['duration'] ?? 0),
-    'service_price' => $data['service_price'] ?? ($firstItem['service_price'] ?? 0),
-    'room_charge' => $data['room_charge'] ?? ($firstItem['room_charge'] ?? 0),
-    'product_total' => $data['product_total'] ?? 0,
-    'total_price' => $data['total_price'] ?? ($firstItem['total_price'] ?? 0),
-    'nominal_dp' => $data['nominal_dp'] ?? 0, // TAMBAH INI
-    'promo_code' => $data['promo_code'] ?? null,
-    'discount_amount' => $data['discount_amount'] ?? 0,
-    'service_charge_amount' => $data['service_charge_amount'] ?? 0,
-    'tax_amount' => $data['tax_amount'] ?? 0,
-    'status' => $hasConflict ? 'pending' : 'confirmed',
-    'payment_status' => $paymentStatus,
-    'confirmed_at' => $hasConflict ? null : Carbon::now(),
-    'guest_name' => $firstItem ? ($firstItem['guest_name'] ?? ($data['customer_name'] ?? null)) : ($data['customer_name'] ?? null),
-    'guest_phone' => $firstItem ? ($firstItem['guest_phone'] ?? ($data['customer_phone'] ?? null)) : ($data['customer_phone'] ?? null),
-    'guest_type' => $firstItem ? ($firstItem['guest_type'] ?? 'dewasa') : 'dewasa',
-    'guest_age' => $firstItem ? ($firstItem['guest_age'] ?? null) : null,
-    'notes' => $consolidatedNotes,
-]);
-
-                    // Increment Promo Usage
-                    if (!empty($data['promo_code'])) {
-                        $promo = \App\Models\Promo::where('code', $data['promo_code'])->first();
-                        if ($promo) {
-                            $promo->incrementUsage();
-                        }
-                    }
-
-                    $firstBooking = $booking;
-
-                    // Create Booking Items for all entries
-                    foreach ($items as $index => $item) {
-                        \App\Models\BookingItem::create([
-                            'booking_id' => $booking->id,
-                            'service_id' => $item['service_id'] ?? null,
-                            'therapist_id' => $item['therapist_id'] ?? null,
-                            'room_id' => $item['room_id'] ?? null,
-                            'price' => $item['service_price'],
-                            'room_charge' => $item['room_charge'] ?? 0,
-                            'duration' => $item['duration'],
-                            'start_time' => $item['start_time'],
-                            'end_time' => $item['end_time'],
-                            'guest_name' => $item['guest_name'] ?? null,
-                            'guest_phone' => $item['guest_phone'] ?? null,
-                            'guest_type' => $item['guest_type'] ?? 'dewasa',
-                            'guest_age' => $item['guest_age'] ?? null,
-                        ]);
-
-                        // Notify Staff for each specific item as they might have different therapists
-                        $therapist = \App\Models\Therapist::find($item['therapist_id'] ?? 0);
-                        if ($therapist && $therapist->phone) {
-                            try {
-                                // Create a mock object for the notification service
-                             $mockBooking = (object) [
-    'booking_date'  => $booking->booking_date,
-    'start_time'    => $item['start_time'],
-    'end_time'      => $item['end_time'] ?? null,
-    'booking_ref'   => $booking->booking_ref ?? null,
-    'branch_id'     => $booking->branch_id ?? null,
-    'branch'        => $booking->branch ?? null,
-    'user'          => $booking->user ?? null,
-    'therapist'     => $therapist,
-    'therapist_id'  => $therapist->id ?? null,
-    'service'       => (object) ['name' => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment')],
-    'service_id'    => $item['service_id'] ?? null,
-    'guest_name'    => $item['guest_name'] ?? null,
-    'items'         => null,
-];
-                                $this->whatsappService->sendStaffBookingNotification($therapist->phone, $mockBooking);
-                            } catch (\Exception $e) {
-                                Log::error("Failed to notify staff via WhatsApp for item $index: " . $e->getMessage());
-                            }
-
-                            if ($therapist->email) {
-    try {
-        $this->emailService->sendStaffBookingNotification($therapist->email, $mockBooking);
-    } catch (\Exception $e) {
-        Log::error("Failed to notify staff via Email for item $index: " . $e->getMessage());
+    if ($payment->status !== 'success') {
+        Log::warning("processSuccessfulPayment early return: status is not success", ['status' => $payment->status]);
+        return;
     }
-}
 
-// ✅ TAMBAH: Notify guest phone
-$guestPhone = $item['guest_phone'] ?? null;
-if ($guestPhone) {
+    DB::beginTransaction();
     try {
-        $this->whatsappService->sendBookingSuccess($guestPhone, [
-            'customer_name'  => $item['guest_name'] ?? 'Tamu',
-            'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
-            'branch_id'      => $booking->branch_id,
-            'booking_ref'    => $booking->booking_ref ?? '-',
-            'therapist_name' => $therapist->name ?? '-',
-            'date'           => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
-            'time'           => substr($item['start_time'], 0, 5) . ' WIB',
-            'service'        => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment'),
-            'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
-        ]);
-    } catch (\Exception $e) {
-        Log::error("Failed to notify guest phone for item $index: " . $e->getMessage());
-    }
-}
+        if ($payment->payment_log_id) {
+            $log = $payment->paymentLog;
+            Log::info("Found PaymentLog ID: " . ($log ? $log->id : 'NULL') . " with status: " . ($log ? $log->status : 'N/A'));
 
-                        }
-                    }
+            if ($log && $log->status === 'pending') {
+                $log->update(['status' => 'settlement']);
+                Log::info("PaymentLog {$log->id} updated to settlement");
+                $data = $log->booking_data;
 
-                    AuditLog::log('payment', 'Booking', "Online payment confirmed via DOKU/Midtrans for REF: {$booking->booking_ref}");
+                Log::info("Processing booking data from log", ['data_keys' => array_keys($data)]);
 
-                    // Notify Customer (once for the whole booking)
-                    $phone = $booking->user ? $booking->user->phone : ($data['customer_phone'] ?? null);
-                    if ($phone) {
-                        try {
-                           $this->whatsappService->sendBookingSuccess($phone, [
-    'customer_name' => $booking->user->name ?? ($data['customer_name'] ?? 'Pelanggan'),
-    'branch_name'   => $booking->branch->name ?? 'Naqupos Spa',
-    'branch_id'     => $booking->branch_id,
-    'booking_ref'   => $booking->booking_ref ?? '-',
-    'date'          => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
-    'time'          => substr($booking->start_time, 0, 5) . ' WIB',
-    'service'       => ($items[0]['service_name'] ?? $booking->service->name ?? 'Treatment') . (count($items) > 1 ? ' (' . count($items) . ' Guests)' : ''),
-    'location'      => $booking->branch->address ?? ($booking->branch->name ?? ''),
-]);
-                        } catch (\Exception $e) {
-                            Log::error("Failed to notify customer: " . $e->getMessage());
-                        }
-                    }
-
-                    // Link payment to the first booking created
-                    if ($firstBooking) {
-                        $payment->update(['booking_id' => $firstBooking->id]);
-                        $this->recordTransaction($payment, $firstBooking, $data);
-                    }
-
+                if (isset($data['is_pos']) && $data['is_pos']) {
+                    Log::info("Payment is for POS, skipping booking creation");
                     DB::commit();
                     return;
                 }
-            } else if ($payment->booking_id) {
-                $booking = $payment->booking;
-                if ($booking) {
-                    $totalPaid = Payment::where('booking_id', $booking->id)
-                        ->where('status', 'success')
-                        ->sum('amount');
 
-                    $updateData = [];
+                $amountPaid = (float) $payment->amount;
+                $totalPrice = (float) $data['total_price'];
+                $paymentStatus = ($data['payment_type'] === 'full_payment' || $amountPaid >= $totalPrice) ? 'paid' : 'partial';
 
-                    // Update payment status
-                    if ($totalPaid >= $booking->total_price) {
-                        $updateData['payment_status'] = 'paid';
-                    } else {
-                        $updateData['payment_status'] = 'partial';
+                $items = isset($data['items']) ? $data['items'] : (isset($data['service_id']) ? [$data] : []);
+                $firstBooking = null;
+
+                $allNotes = [];
+                $hasConflict = false;
+                foreach ($items as $item) {
+                    if (!empty($item['notes'])) {
+                        $allNotes[] = $item['notes'];
                     }
 
-                    // Update booking status to confirmed if currently pending_payment
-                    if ($booking->status === 'pending_payment') {
-                        $updateData['status'] = 'confirmed';
-                        $updateData['confirmed_at'] = Carbon::now();
+                    $conflict = Booking::where('booking_date', $item['booking_date'])
+                        ->where('therapist_id', $item['therapist_id'])
+                        ->where('start_time', '<', $item['end_time'])
+                        ->where('end_time', '>', $item['start_time'])
+                        ->whereIn('status', ['confirmed', 'in_progress'])
+                        ->exists();
+
+                    if (!$conflict && isset($item['room_id'])) {
+                        $room = Room::find($item['room_id']);
+                        if ($room) {
+                            $existingCount = Booking::where('booking_date', $item['booking_date'])
+                                ->where('room_id', $item['room_id'])
+                                ->where('start_time', '<', $item['end_time'])
+                                ->where('end_time', '>', $item['start_time'])
+                                ->whereIn('status', ['confirmed', 'in_progress'])
+                                ->count();
+                            if ($existingCount >= ($room->capacity * max(1, $room->quantity ?? 1))) {
+                                $conflict = true;
+                            }
+                        }
                     }
 
-                    $booking->update($updateData);
-
-                    $this->recordTransaction($payment, $booking, [
-                        'items' => [
-                            [
-                                'name' => 'Payment for Booking #' . $booking->booking_ref,
-                                'price' => $payment->amount,
-                                'quantity' => 1,
-                                'type' => 'service',
-                                'service_id' => $booking->service_id
-                            ]
-                        ]
-                    ]);
+                    if ($conflict) {
+                        $hasConflict = true;
+                    }
                 }
+
+                $consolidatedNotes = implode(" | ", array_unique($allNotes));
+                if ($hasConflict) {
+                    $consolidatedNotes .= ($consolidatedNotes ? " " : "") . "[Overbooked/Conflict]";
+                }
+
+                $firstItem = !empty($items) ? $items[0] : null;
+                $booking = Booking::create([
+                    'user_id'               => $data['user_id'] ?? null,
+                    'branch_id'             => $data['branch_id'] ?? null,
+                    'service_id'            => $firstItem ? ($firstItem['service_id'] ?? null) : null,
+                    'therapist_id'          => $firstItem ? ($firstItem['therapist_id'] ?? null) : null,
+                    'room_id'               => $firstItem ? ($firstItem['room_id'] ?? null) : null,
+                    'booking_date'          => $firstItem ? $firstItem['booking_date'] : ($data['booking_date'] ?? Carbon::now()->toDateString()),
+                    'start_time'            => $firstItem ? $firstItem['start_time'] : null,
+                    'end_time'              => $firstItem ? $firstItem['end_time'] : null,
+                    'duration'              => $data['duration'] ?? ($firstItem['duration'] ?? 0),
+                    'service_price'         => $data['service_price'] ?? ($firstItem['service_price'] ?? 0),
+                    'room_charge'           => $data['room_charge'] ?? ($firstItem['room_charge'] ?? 0),
+                    'product_total'         => $data['product_total'] ?? 0,
+                    'total_price'           => $data['total_price'] ?? ($firstItem['total_price'] ?? 0),
+                    'nominal_dp'            => $data['nominal_dp'] ?? 0,
+                    'promo_code'            => $data['promo_code'] ?? null,
+                    'discount_amount'       => $data['discount_amount'] ?? 0,
+                    'service_charge_amount' => $data['service_charge_amount'] ?? 0,
+                    'tax_amount'            => $data['tax_amount'] ?? 0,
+                    'status'                => $hasConflict ? 'pending' : 'confirmed',
+                    'payment_status'        => $paymentStatus,
+                    'confirmed_at'          => $hasConflict ? null : Carbon::now(),
+                    'guest_name'            => $firstItem ? ($firstItem['guest_name'] ?? ($data['customer_name'] ?? null)) : ($data['customer_name'] ?? null),
+                    'guest_phone'           => $firstItem ? ($firstItem['guest_phone'] ?? ($data['customer_phone'] ?? null)) : ($data['customer_phone'] ?? null),
+                    'guest_type'            => $firstItem ? ($firstItem['guest_type'] ?? 'dewasa') : 'dewasa',
+                    'guest_age'             => $firstItem ? ($firstItem['guest_age'] ?? null) : null,
+                    'notes'                 => $consolidatedNotes,
+                ]);
+
+                // Increment Promo Usage
+                if (!empty($data['promo_code'])) {
+                    $promo = \App\Models\Promo::where('code', $data['promo_code'])->first();
+                    if ($promo) {
+                        $promo->incrementUsage();
+                    }
+                }
+
+                $firstBooking = $booking;
+
+                // Create Booking Items + Notify Staff + Notify Guest per item
+                foreach ($items as $index => $item) {
+                    \App\Models\BookingItem::create([
+                        'booking_id'  => $booking->id,
+                        'service_id'  => $item['service_id'] ?? null,
+                        'therapist_id'=> $item['therapist_id'] ?? null,
+                        'room_id'     => $item['room_id'] ?? null,
+                        'price'       => $item['service_price'],
+                        'room_charge' => $item['room_charge'] ?? 0,
+                        'duration'    => $item['duration'],
+                        'start_time'  => $item['start_time'],
+                        'end_time'    => $item['end_time'],
+                        'guest_name'  => $item['guest_name'] ?? null,
+                        'guest_phone' => $item['guest_phone'] ?? null,
+                        'guest_type'  => $item['guest_type'] ?? 'dewasa',
+                        'guest_age'   => $item['guest_age'] ?? null,
+                    ]);
+
+                    // Resolve therapist untuk item ini (tidak harus punya phone)
+                    $therapist = \App\Models\Therapist::find($item['therapist_id'] ?? 0);
+
+                    // Notify Staff — hanya kalau therapist ada & punya phone
+                    if ($therapist && $therapist->phone) {
+                        try {
+                            $mockBooking = (object) [
+                                'booking_date' => $booking->booking_date,
+                                'start_time'   => $item['start_time'],
+                                'end_time'     => $item['end_time'] ?? null,
+                                'booking_ref'  => $booking->booking_ref ?? null,
+                                'branch_id'    => $booking->branch_id ?? null,
+                                'branch'       => $booking->branch ?? null,
+                                'user'         => $booking->user ?? null,
+                                'therapist'    => $therapist,
+                                'therapist_id' => $therapist->id ?? null,
+                                'service'      => (object) ['name' => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment')],
+                                'service_id'   => $item['service_id'] ?? null,
+                                'guest_name'   => $item['guest_name'] ?? null,
+                                'items'        => null,
+                            ];
+                            $this->whatsappService->sendStaffBookingNotification($therapist->phone, $mockBooking);
+                        } catch (\Exception $e) {
+                            Log::error("Failed to notify staff WA for item $index: " . $e->getMessage());
+                        }
+
+                        if ($therapist->email) {
+                            try {
+                                $this->emailService->sendStaffBookingNotification($therapist->email, $mockBooking);
+                            } catch (\Exception $e) {
+                                Log::error("Failed to notify staff email for item $index: " . $e->getMessage());
+                            }
+                        }
+                    }
+
+                    // Notify Guest per item — TERPISAH dari kondisi therapist punya phone
+                    $guestPhone = $item['guest_phone'] ?? null;
+                    if ($guestPhone) {
+                        try {
+                            $this->whatsappService->sendBookingSuccess($guestPhone, [
+                                'customer_name'  => $item['guest_name'] ?? 'Tamu',
+                                'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
+                                'branch_id'      => $booking->branch_id,
+                                'booking_ref'    => $booking->booking_ref ?? '-',
+                                'therapist_name' => $therapist?->name ?? '-',
+                                'date'           => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
+                                'time'           => substr($item['start_time'], 0, 5) . ' WIB',
+                                'service'        => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment'),
+                                'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
+                            ]);
+                        } catch (\Exception $e) {
+                            Log::error("Failed to notify guest WA for item $index: " . $e->getMessage());
+                        }
+                    }
+                }
+
+                AuditLog::log('payment', 'Booking', "Online payment confirmed via DOKU/Midtrans for REF: {$booking->booking_ref}");
+
+                // Notify Customer (main booking phone) — hanya kalau beda dari semua guest_phone
+                $phone = $booking->user ? $booking->user->phone : ($data['customer_phone'] ?? null);
+                $allGuestPhones = array_filter(array_column($items, 'guest_phone'));
+
+                if ($phone && !in_array($phone, $allGuestPhones)) {
+                    // Cari therapist pertama yang valid untuk nama
+                    $firstTherapist = null;
+                    foreach ($items as $item) {
+                        if (!empty($item['therapist_id'])) {
+                            $firstTherapist = \App\Models\Therapist::find($item['therapist_id']);
+                            if ($firstTherapist) break;
+                        }
+                    }
+
+                    try {
+                        $this->whatsappService->sendBookingSuccess($phone, [
+                            'customer_name'  => $booking->user->name ?? ($data['customer_name'] ?? 'Pelanggan'),
+                            'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
+                            'branch_id'      => $booking->branch_id,
+                            'booking_ref'    => $booking->booking_ref ?? '-',
+                            'therapist_name' => $firstTherapist?->name ?? '-',
+                            'date'           => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
+                            'time'           => substr($items[0]['start_time'] ?? $booking->start_time, 0, 5) . ' WIB',
+                            'service'        => ($items[0]['service_name'] ?? $booking->service?->name ?? 'Treatment')
+                                                . (count($items) > 1 ? ' (' . count($items) . ' Guests)' : ''),
+                            'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
+                        ]);
+                    } catch (\Exception $e) {
+                        Log::error("Failed to notify customer: " . $e->getMessage());
+                    }
+                }
+
+                // Link payment to booking
+                if ($firstBooking) {
+                    $payment->update(['booking_id' => $firstBooking->id]);
+                    $this->recordTransaction($payment, $firstBooking, $data);
+                }
+
+                DB::commit();
+                return;
             }
-            DB::commit();
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('processSuccessfulPayment Error: ' . $e->getMessage());
-            throw $e;
+        } else if ($payment->booking_id) {
+            $booking = $payment->booking;
+            if ($booking) {
+                $totalPaid = Payment::where('booking_id', $booking->id)
+                    ->where('status', 'success')
+                    ->sum('amount');
+
+                $updateData = [];
+
+                if ($totalPaid >= $booking->total_price) {
+                    $updateData['payment_status'] = 'paid';
+                } else {
+                    $updateData['payment_status'] = 'partial';
+                }
+
+                if ($booking->status === 'pending_payment') {
+                    $updateData['status'] = 'confirmed';
+                    $updateData['confirmed_at'] = Carbon::now();
+                }
+
+                $booking->update($updateData);
+
+                $this->recordTransaction($payment, $booking, [
+                    'items' => [
+                        [
+                            'name'       => 'Payment for Booking #' . $booking->booking_ref,
+                            'price'      => $payment->amount,
+                            'quantity'   => 1,
+                            'type'       => 'service',
+                            'service_id' => $booking->service_id
+                        ]
+                    ]
+                ]);
+            }
         }
+        DB::commit();
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('processSuccessfulPayment Error: ' . $e->getMessage());
+        throw $e;
     }
+}
 
     private function handleDokuNotification(Request $request)
     {
