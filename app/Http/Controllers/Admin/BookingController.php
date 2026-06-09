@@ -118,10 +118,17 @@ class BookingController extends Controller
 
     $updateData = ['status' => $request->status];
 
-    if ($request->status === 'completed') {
+   if ($request->status === 'completed') {
         $updateData['completed_at'] = Carbon::now();
         $this->recordCommission($booking);
 
+        // Notify Customer: Review Request
+        $customer = $booking->user;
+        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
+        if ($phone) {
+            $this->whatsappService->sendReviewRequest($phone, $booking);
+        }
+    // SESUDAH
     } elseif ($request->status === 'cancelled') {
         $updateData['cancelled_at'] = Carbon::now();
 
@@ -136,6 +143,19 @@ class BookingController extends Controller
                 $this->emailService->sendStaffCancellationNotification($booking->therapist->email, $booking);
             }
         }
+
+        // Notify Customer
+        $customer = $booking->user;
+        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
+        $email = $customer ? $customer->email : null;
+
+        if ($phone) {
+            $this->whatsappService->sendCustomerCancellationNotification($phone, $booking);
+        }
+        if ($email) {
+            $this->emailService->sendCustomerCancellationNotification($email, $booking);
+        }
+        
 
     } elseif ($request->status === 'confirmed') {
         $updateData['confirmed_at'] = Carbon::now();
@@ -1101,6 +1121,17 @@ class BookingController extends Controller
             }
         }
 
+          $customer = $booking->user;
+        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
+        $email = $customer ? $customer->email : null;
+
+        if ($phone) {
+            $this->whatsappService->sendCustomerRescheduleNotification($phone, $booking);
+        }
+        if ($email) {
+            $this->emailService->sendCustomerRescheduleNotification($email, $booking);
+        }
+
         return response()->json([
             'message' => 'Booking rescheduled successfully',
             'booking' => $booking->fresh(['items'])
@@ -1147,7 +1178,30 @@ class BookingController extends Controller
 
     $this->recalculateBooking($booking);
 
-    $newTotalPrice = $booking->total_price;
+        // Notify Therapist
+        $therapist = $item->therapist ?? $booking->therapist;
+        if ($therapist) {
+            if ($therapist->phone) {
+                $this->whatsappService->sendStaffCancellationNotification($therapist->phone, $booking);
+            }
+            if ($therapist->email) {
+                $this->emailService->sendStaffCancellationNotification($therapist->email, $booking);
+            }
+        }
+
+        // Notify Customer
+        $customer = $booking->user;
+        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
+        $email = $customer ? $customer->email : null;
+
+        if ($phone) {
+            $this->whatsappService->sendCustomerCancellationNotification($phone, $booking);
+        }
+        if ($email) {
+            $this->emailService->sendCustomerCancellationNotification($email, $booking);
+        }
+
+        $newTotalPrice = $booking->total_price;
     $priceDiff = $newTotalPrice - $oldTotalPrice;
 
     BookingAgendaLog::create([
@@ -1321,10 +1375,21 @@ class BookingController extends Controller
         "Rescheduled item {$itemId} in booking REF: {$sourceBooking->booking_ref} to {$newDate} {$newStart} (in-place, no split)"
     );
 
-    return response()->json([
-        'message' => 'Item rescheduled successfully',
-        'booking' => $sourceBooking->fresh(['items']),
-    ]);
+     $customer = $sourceBooking->user;
+        $phone = $customer ? $customer->phone : ($sourceBooking->guest_phone ?? null);
+        $email = $customer ? $customer->email : null;
+
+        if ($phone) {
+            $this->whatsappService->sendCustomerRescheduleNotification($phone, $sourceBooking);
+        }
+        if ($email) {
+            $this->emailService->sendCustomerRescheduleNotification($email, $sourceBooking);
+        }
+
+        return response()->json([
+            'message' => 'Item rescheduled successfully',
+            'booking' => $sourceBooking->fresh(['items']),
+        ]);
 }
 
     public function completeItem(Request $request, $id, $itemId)
@@ -1363,8 +1428,14 @@ class BookingController extends Controller
             // Actually, keep status as active but the booking status is completed.
 
             // Record Commission
-            $this->recordCommission($sourceBooking);
+           $this->recordCommission($sourceBooking);
 
+            // Notify Customer: Review Request
+            $customer = $sourceBooking->user;
+            $phone = $customer ? $customer->phone : ($sourceBooking->guest_phone ?? null);
+            if ($phone) {
+                $this->whatsappService->sendReviewRequest($phone, $sourceBooking);
+            }
             AuditLog::log('update', 'Reservasi Item', "Completed only item {$itemId} in booking REF: {$sourceBooking->booking_ref}");
 
             return response()->json([
@@ -1415,7 +1486,15 @@ class BookingController extends Controller
         $this->recalculateBooking($sourceBooking);
 
         // Record Commission
-        $this->recordCommission($newBooking);
+         $this->recordCommission($newBooking);
+
+        // Notify Customer: Review Request
+        $customer = $newBooking->user;
+        $phone = $customer ? $customer->phone : ($newBooking->guest_phone ?? null);
+        if ($phone) {
+            $this->whatsappService->sendReviewRequest($phone, $newBooking);
+        }
+
 
         AuditLog::log('update', 'Reservasi Item', "Completed item {$itemId} from booking REF: {$sourceBooking->booking_ref}");
 
