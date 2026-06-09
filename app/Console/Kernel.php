@@ -28,11 +28,12 @@ class Kernel extends ConsoleKernel
      * @param  \Illuminate\Console\Scheduling\Schedule  $schedule
      * @return void
      */
-    protected function schedule(Schedule $schedule)
-    {
-        $schedule->command('payment:cleanup')->everyMinute();
-        $schedule->command('reminders:send')->everyFifteenMinutes();
-        $schedule->command('reviews:request')->hourly();
-        $schedule->command('automations:process')->dailyAt('08:00');
-    }
+   protected function schedule(Schedule $schedule)
+{
+    $schedule->command('payment:cleanup')->everyMinute();
+    $schedule->command('reminders:send --type=h1')->dailyAt('21:00');
+    $schedule->command('reminders:send --type=2h')->hourly();
+    $schedule->command('reviews:request')->hourly();
+    $schedule->command('automations:process')->dailyAt('08:00');
+}
 }

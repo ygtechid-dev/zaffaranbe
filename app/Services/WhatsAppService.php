@@ -497,30 +497,32 @@ class WhatsAppService
     /**
      * Customer: Reminder H-1 & 2 Jam
      */
-    public function sendReminder($phone, $booking, $type = 'H-1')
-    {
-        if (empty($phone)) return false;
-        $branchId     = $booking->branch_id ?? null;
-        $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+  public function sendReminder($phone, $booking, $type = 'H-1')
+{
+    if (empty($phone)) return false;
+    $branchId     = $booking->branch_id ?? null;
+    $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
 
-        $eventKey = ($type === 'H-1') ? 'customer_reminder_h1' : 'customer_reminder_2h';
-        $vars     = $this->resolveSystemVars($booking);
+    $eventKey = ($type === 'H-1') ? 'customer_reminder_h1' : 'customer_reminder_2h';
+    $vars     = $this->resolveSystemVars($booking);
 
-        $sent = $this->sendMappedTemplate($eventKey, $phone, $customerName, $vars);
+    $sent = $this->sendMappedTemplate($eventKey, $phone, $customerName, $vars);
 
-        if (!$sent) {
-            $templateType = ($type === 'H-1') ? 'reminder_h1' : 'reminder_h2';
-            $data = [
-                'customer' => $booking->user ?? (object)['name' => $customerName],
-                'booking'  => $booking,
-                'branch'   => $booking->branch
-            ];
-            $parsed = $this->notificationTemplateService->parseTemplate($templateType, $data, $branchId);
-            if ($parsed) {
-                $this->sendMessage($phone, $parsed['message'], $branchId);
-            }
+    if (!$sent) {
+        $templateType = ($type === 'H-1') ? 'reminder_h1' : 'reminder_h2';
+        $data = [
+            'customer' => $booking->user ?? (object)['name' => $customerName],
+            'booking'  => $booking,
+            'branch'   => $booking->branch
+        ];
+        $parsed = $this->notificationTemplateService->parseTemplate($templateType, $data, $branchId);
+        if ($parsed) {
+            $this->sendMessage($phone, $parsed['message'], $branchId);
         }
     }
+
+    return $sent; // TAMBAH INI
+}
 
     /**
      * Customer: Review Request
