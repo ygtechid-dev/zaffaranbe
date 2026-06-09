@@ -198,4 +198,34 @@ class EmailService
 
         return $this->sendEmail($email, $subject, $message);
     }
+
+    /**
+ * Send notification to customer about a reschedule
+ */
+public function sendCustomerRescheduleNotification($email, $booking)
+{
+    if (empty($email))
+        return false;
+
+    $date = $booking->booking_date instanceof \Carbon\Carbon
+        ? $booking->booking_date->format('d M Y')
+        : \Carbon\Carbon::parse($booking->booking_date)->format('d M Y');
+
+    $startTime   = substr($booking->start_time ?? '00:00', 0, 5);
+    $serviceName = $booking->service?->name ?? 'Layanan';
+    $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+
+    $subject = "[Zafaran] Perubahan Jadwal Booking - " . $date;
+
+    $message  = "Halo {$customerName},\n\n";
+    $message .= "Jadwal booking Anda telah DIUBAH:\n";
+    $message .= "---------------------------\n";
+    $message .= "Referensi : {$booking->booking_ref}\n";
+    $message .= "Layanan   : {$serviceName}\n";
+    $message .= "Jadwal Baru: {$date} jam {$startTime} WIB\n";
+    $message .= "---------------------------\n\n";
+    $message .= "Jika ada pertanyaan, silakan hubungi kami. Terima kasih!";
+
+    return $this->sendEmail($email, $subject, $message);
+}
 }
