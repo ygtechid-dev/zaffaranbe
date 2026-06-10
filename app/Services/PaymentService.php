@@ -464,7 +464,7 @@ class PaymentService
                         'line_items' => $lineItems
                     ],
                     'payment' => [
-                        'payment_due_date' => 60, // 60 minutes
+                        'payment_due_date' => 15, // 60 minutes
                     ],
                     'customer' => [
                         'name' => $this->sanitizeDokuString(substr($customerName, 0, 50)), // DOKU limit
