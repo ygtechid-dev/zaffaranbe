@@ -21,7 +21,9 @@ class WhatsAppService
         $this->notificationTemplateService = $notificationTemplateService;
 
         // Wrapper Express di apicekat.zafaranspasolo.com
-        $this->wrapperUrl     = rtrim(env('CEKAT_WRAPPER_URL', 'https://apicekat.zafaranspasolo.com'), '/');
+        // $this->wrapperUrl     = rtrim(env('CEKAT_WRAPPER_URL', 'https://apicekat.zafaranspasolo.com'), '/');
+        $this->wrapperUrl = rtrim(env('WHATSAPP_WRAPPER_URL', 'https://apinaqu.zafarangroupindonesia.com'), '/');
+
         $this->defaultInboxId = env('CEKAT_INBOX_ID', '');
 
         $this->loadConfig();
