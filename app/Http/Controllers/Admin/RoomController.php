@@ -50,6 +50,7 @@ class RoomController extends Controller
         $validator = Validator::make($data, [
             'name' => 'required|string|max:255',
             'code' => 'nullable|string',
+            'type' => 'required|string|in:standard,vvip',
             'capacity' => 'required|integer|min:1',
             'quantity' => 'required|integer|min:1',
             'extra_charge' => 'nullable|numeric|min:0',
@@ -111,6 +112,7 @@ class RoomController extends Controller
         $validator = Validator::make($data, [
             'name' => 'sometimes|required|string|max:255',
             'code' => 'sometimes|nullable|string',
+            'type' => 'sometimes|required|string|in:standard,vvip',
             'capacity' => 'sometimes|integer|min:1',
             'quantity' => 'sometimes|integer|min:1',
             'extra_charge' => 'nullable|numeric|min:0',
