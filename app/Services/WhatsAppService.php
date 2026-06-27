@@ -20,8 +20,6 @@ class WhatsAppService
     {
         $this->notificationTemplateService = $notificationTemplateService;
 
-        // Wrapper Express di apicekat.zafaranspasolo.com
-        // $this->wrapperUrl     = rtrim(env('CEKAT_WRAPPER_URL', 'https://apicekat.zafaranspasolo.com'), '/');
         $this->wrapperUrl = rtrim(env('WHATSAPP_WRAPPER_URL', 'https://apinaqu.zafarangroupindonesia.com'), '/');
 
         $this->defaultInboxId = env('CEKAT_INBOX_ID', '');
@@ -33,9 +31,6 @@ class WhatsAppService
     // CONFIG
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Load config WA lama (untuk fallback sendMessage / OTP / Welcome / dll)
-     */
     protected function loadConfig($branchId = null)
     {
         try {
@@ -72,17 +67,17 @@ class WhatsAppService
     // HELPERS
     // ─────────────────────────────────────────────────────────────────────────
 
-   private function formatPhone($phone)
-{
-    $phone = preg_replace('/[^0-9]/', '', $phone);
-    if (str_starts_with($phone, '0')) {
-        $phone = '62' . substr($phone, 1);
+    private function formatPhone($phone)
+    {
+        $phone = preg_replace('/[^0-9]/', '', $phone);
+        if (str_starts_with($phone, '0')) {
+            $phone = '62' . substr($phone, 1);
+        }
+        if (!str_starts_with($phone, '62')) {
+            $phone = '62' . $phone;
+        }
+        return $phone;
     }
-    if (!str_starts_with($phone, '62')) {
-        $phone = '62' . $phone; // ← kalau nomor "62xxx" sudah benar, ini skip
-    }
-    return $phone;
-}
 
     private function formatIndonesianDate($date)
     {
@@ -98,7 +93,7 @@ class WhatsAppService
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // NOTIF SETTINGS — ambil dari wrapper /notif-settings
+    // NOTIF SETTINGS
     // ─────────────────────────────────────────────────────────────────────────
 
     protected function getNotifSettings(): array
@@ -142,7 +137,6 @@ class WhatsAppService
     {
         $serviceName = $booking->service ? $booking->service->name : 'Treatment';
 
-        // Support multi-item booking
         if (
             !$booking->service
             && method_exists($booking, 'items')
@@ -173,22 +167,13 @@ class WhatsAppService
     // SEND MAPPED TEMPLATE — via wrapper POST /smart-send
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Kirim template berdasarkan event setting dari wrapper.
-     * Wrapper akan resolve template_id, mapping vars, dan kirim ke Cekat API.
-     *
-     * @param string     $eventKey  Key event, contoh: 'customer_confirmation'
-     * @param string     $phone     Nomor WA
-     * @param string     $name      Nama penerima
-     * @param array      $vars      System variables
-     * @param string|null $inboxId  Override inbox_id
-     */
     protected function sendMappedTemplate(
         string $eventKey,
         string $phone,
         string $name,
         array $vars = [],
-        ?string $inboxId = null
+        ?string $inboxId = null,
+        ?string $email = null
     ): bool {
         try {
             $response = Http::timeout(10)->post($this->wrapperUrl . '/smart-send', [
@@ -197,13 +182,14 @@ class WhatsAppService
                 'phone_name'   => $name,
                 'inbox_id'     => $inboxId ?? $this->defaultInboxId,
                 'variables'    => $vars,
+                'email'        => $email ?? null,
             ]);
 
             $body = $response->json();
 
             if ($body['skipped'] ?? false) {
                 Log::info("[WA] smart-send skipped event={$eventKey}", ['reason' => $body['reason'] ?? '']);
-                return false; // caller akan fallback ke text
+                return false;
             }
 
             if (!($body['success'] ?? false)) {
@@ -211,7 +197,7 @@ class WhatsAppService
                 return false;
             }
 
-            Log::info("[WA] smart-send ok event={$eventKey} phone={$phone}");
+            Log::info("[WA] smart-send ok event={$eventKey} phone={$phone}" . ($email ? " email={$email}" : ''));
             return true;
         } catch (\Exception $e) {
             Log::error("[WA] smart-send exception event={$eventKey}: " . $e->getMessage());
@@ -220,7 +206,7 @@ class WhatsAppService
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // SEND TEXT (legacy — masih dipakai untuk fallback & OTP/Welcome)
+    // SEND TEXT (legacy — fallback & OTP/Welcome)
     // ─────────────────────────────────────────────────────────────────────────
 
     public function sendMessage($phone, $message, $branchId = null)
@@ -245,7 +231,7 @@ class WhatsAppService
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // OTP & WELCOME (pakai endpoint lama, tidak lewat Cekat)
+    // OTP & WELCOME
     // ─────────────────────────────────────────────────────────────────────────
 
     public function sendOtp($phone, $otp)
@@ -297,10 +283,6 @@ class WhatsAppService
     // CUSTOMER NOTIFICATIONS
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Dipanggil dari PaymentController & BookingController
-     * $type: 'confirmation' | 'reschedule' | 'cancellation' | 'reminder_h1' | 'reminder_h2' | 'review'
-     */
     public function sendCustomerNotification($phone, $type, $data, $branchId = null)
     {
         if (empty($phone)) return false;
@@ -309,13 +291,14 @@ class WhatsAppService
         $booking      = $data['booking']  ?? null;
         $branch       = $data['branch']   ?? null;
         $customerName = $data['customer_name'] ?? ($customer?->name ?? 'Pelanggan');
+        $email        = $data['email'] ?? ($customer?->email ?? null);
 
         $eventMap = [
-            'confirmation' => 'customer_confirmation',
-            'reschedule'   => 'customer_reschedule',
-            'cancellation' => 'customer_cancellation',
-            'reminder_h1'  => 'customer_reminder_h1',
-            'reminder_h2'  => 'customer_reminder_2h',
+            'confirmation'   => 'customer_confirmation',
+            'reschedule'     => 'customer_reschedule',
+            'cancellation'   => 'customer_cancellation',
+            'reminder_h1'    => 'customer_reminder_h1',
+            'reminder_h2'    => 'customer_reminder_2h',
             'review_request' => 'customer_review',
         ];
 
@@ -329,16 +312,14 @@ class WhatsAppService
             ]);
         }
 
-        // Merge extra dari data langsung (misal dp_amount)
         if (isset($data['dp_amount'])) {
             $vars['refund_amount'] = 'Rp ' . number_format($data['dp_amount'], 0, ',', '.');
         }
 
         $inboxId = $branch?->cekat_inbox_id ?? $this->defaultInboxId;
 
-        $sent = $this->sendMappedTemplate($eventKey, $phone, $customerName, $vars, $inboxId);
+        $sent = $this->sendMappedTemplate($eventKey, $phone, $customerName, $vars, $inboxId, $email);
 
-        // Fallback ke NotificationTemplateService (sistem lama)
         if (!$sent) {
             $parsed = $this->notificationTemplateService->parseTemplate($type, $data, $branchId);
             if ($parsed) {
@@ -349,10 +330,6 @@ class WhatsAppService
         return $sent;
     }
 
-    /**
-     * Customer: Booking success / konfirmasi dengan link payment
-     * Dipanggil dari PaymentController::initiate
-     */
     public function sendBookingSuccess($phone, $data)
     {
         if (empty($phone)) return false;
@@ -360,6 +337,7 @@ class WhatsAppService
         $this->loadConfig($branchId);
 
         $customerName = $data['customer_name'] ?? 'Pelanggan';
+        $email        = $data['email'] ?? null;
 
         $vars = [
             'customer_name'  => $customerName,
@@ -374,10 +352,9 @@ class WhatsAppService
             'review_link'    => '-',
         ];
 
-        $sent = $this->sendMappedTemplate('customer_confirmation', $phone, $customerName, $vars);
+        $sent = $this->sendMappedTemplate('customer_confirmation', $phone, $customerName, $vars, null, $email);
 
         if (!$sent) {
-            // Fallback endpoint lama
             try {
                 $response = Http::withToken($this->token)
                     ->post($this->baseUrl . '/api/messages/reservation-success', [
@@ -401,20 +378,18 @@ class WhatsAppService
         return true;
     }
 
-    /**
-     * Customer: Cancellation
-     */
     public function sendCustomerCancellationNotification($phone, $booking, $reason = null)
     {
         if (empty($phone)) return false;
         $branchId     = $booking->branch_id ?? null;
         $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+        $email        = $booking->user?->email ?? null;
 
         $vars = $this->resolveSystemVars($booking, [
             'cancellation_reason' => $reason ?? '-',
         ]);
 
-        $sent = $this->sendMappedTemplate('customer_cancellation', $phone, $customerName, $vars);
+        $sent = $this->sendMappedTemplate('customer_cancellation', $phone, $customerName, $vars, null, $email);
 
         if (!$sent) {
             $date        = $this->formatIndonesianDate($booking->booking_date);
@@ -435,17 +410,15 @@ class WhatsAppService
         }
     }
 
-    /**
-     * Customer: Reschedule
-     */
     public function sendCustomerRescheduleNotification($phone, $booking)
     {
         if (empty($phone)) return false;
         $branchId     = $booking->branch_id ?? null;
         $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+        $email        = $booking->user?->email ?? null;
         $vars         = $this->resolveSystemVars($booking);
 
-        $sent = $this->sendMappedTemplate('customer_reschedule', $phone, $customerName, $vars);
+        $sent = $this->sendMappedTemplate('customer_reschedule', $phone, $customerName, $vars, null, $email);
 
         if (!$sent) {
             $date        = $this->formatIndonesianDate($booking->booking_date);
@@ -464,19 +437,17 @@ class WhatsAppService
         }
     }
 
-    /**
-     * Customer: Refund
-     */
     public function sendCustomerRefundNotification($phone, $booking, $amount, $status = 'requested')
     {
         if (empty($phone)) return false;
         $branchId     = $booking->branch_id ?? null;
         $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+        $email        = $booking->user?->email ?? null;
         $amountFmt    = 'Rp ' . number_format($amount, 0, ',', '.');
 
         $vars = $this->resolveSystemVars($booking, ['refund_amount' => $amountFmt]);
 
-        $sent = $this->sendMappedTemplate('customer_refund', $phone, $customerName, $vars);
+        $sent = $this->sendMappedTemplate('customer_refund', $phone, $customerName, $vars, null, $email);
 
         if (!$sent) {
             $statusLabel = $status === 'requested' ? '*TELAH DIAJUKAN*' : '*TELAH DIPROSES*';
@@ -496,49 +467,45 @@ class WhatsAppService
         }
     }
 
-    /**
-     * Customer: Reminder H-1 & 2 Jam
-     */
-  public function sendReminder($phone, $booking, $type = 'H-1')
-{
-    if (empty($phone)) return false;
-    $branchId     = $booking->branch_id ?? null;
-    $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+    public function sendReminder($phone, $booking, $type = 'H-1')
+    {
+        if (empty($phone)) return false;
+        $branchId     = $booking->branch_id ?? null;
+        $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+        $email        = $booking->user?->email ?? null;
 
-    $eventKey = ($type === 'H-1') ? 'customer_reminder_h1' : 'customer_reminder_2h';
-    $vars     = $this->resolveSystemVars($booking);
+        $eventKey = ($type === 'H-1') ? 'customer_reminder_h1' : 'customer_reminder_2h';
+        $vars     = $this->resolveSystemVars($booking);
 
-    $sent = $this->sendMappedTemplate($eventKey, $phone, $customerName, $vars);
+        $sent = $this->sendMappedTemplate($eventKey, $phone, $customerName, $vars, null, $email);
 
-    if (!$sent) {
-        $templateType = ($type === 'H-1') ? 'reminder_h1' : 'reminder_h2';
-        $data = [
-            'customer' => $booking->user ?? (object)['name' => $customerName],
-            'booking'  => $booking,
-            'branch'   => $booking->branch
-        ];
-        $parsed = $this->notificationTemplateService->parseTemplate($templateType, $data, $branchId);
-        if ($parsed) {
-            $this->sendMessage($phone, $parsed['message'], $branchId);
+        if (!$sent) {
+            $templateType = ($type === 'H-1') ? 'reminder_h1' : 'reminder_h2';
+            $data = [
+                'customer' => $booking->user ?? (object)['name' => $customerName],
+                'booking'  => $booking,
+                'branch'   => $booking->branch
+            ];
+            $parsed = $this->notificationTemplateService->parseTemplate($templateType, $data, $branchId);
+            if ($parsed) {
+                $this->sendMessage($phone, $parsed['message'], $branchId);
+            }
         }
+
+        return $sent;
     }
 
-    return $sent; // TAMBAH INI
-}
-
-    /**
-     * Customer: Review Request
-     */
     public function sendReviewRequest($phone, $booking)
     {
         if (empty($phone)) return false;
         $branchId     = $booking->branch_id ?? null;
         $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+        $email        = $booking->user?->email ?? null;
         $reviewLink   = env('APP_URL') . '/review/' . ($booking->booking_ref ?? $booking->id);
 
         $vars = $this->resolveSystemVars($booking, ['review_link' => $reviewLink]);
 
-        $sent = $this->sendMappedTemplate('customer_review', $phone, $customerName, $vars);
+        $sent = $this->sendMappedTemplate('customer_review', $phone, $customerName, $vars, null, $email);
 
         if (!$sent) {
             $data = [
@@ -558,17 +525,15 @@ class WhatsAppService
     // STAFF NOTIFICATIONS
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Staff: Booking Baru
-     */
     public function sendStaffBookingNotification($phone, $booking)
     {
         if (empty($phone)) return false;
         $branchId      = $booking->branch_id ?? null;
         $therapistName = $booking->therapist?->name ?? 'Terapis';
+        $email         = $booking->therapist?->email ?? null;
         $vars          = $this->resolveSystemVars($booking);
 
-        $sent = $this->sendMappedTemplate('staff_booking_new', $phone, $therapistName, $vars);
+        $sent = $this->sendMappedTemplate('staff_booking_new', $phone, $therapistName, $vars, null, $email);
 
         if (!$sent) {
             $date         = $this->formatIndonesianDate($booking->booking_date);
@@ -589,21 +554,19 @@ class WhatsAppService
         }
     }
 
-    /**
-     * Staff: Reschedule
-     */
     public function sendStaffRescheduleNotification($phone, $booking)
     {
         if (empty($phone)) return false;
         $branchId      = $booking->branch_id ?? null;
         $therapistName = $booking->therapist?->name ?? 'Terapis';
+        $email         = $booking->therapist?->email ?? null;
         $vars          = $this->resolveSystemVars($booking);
 
-        $sent = $this->sendMappedTemplate('staff_reschedule', $phone, $therapistName, $vars);
+        $sent = $this->sendMappedTemplate('staff_reschedule', $phone, $therapistName, $vars, null, $email);
 
         if (!$sent) {
-            $date        = $this->formatIndonesianDate($booking->booking_date);
-            $startTime   = substr($booking->start_time ?? '00:00', 0, 5);
+            $date         = $this->formatIndonesianDate($booking->booking_date);
+            $startTime    = substr($booking->start_time ?? '00:00', 0, 5);
             $customerName = $booking->user?->name ?? 'Customer';
             $serviceName  = $booking->service?->name ?? 'Layanan';
 
@@ -620,17 +583,15 @@ class WhatsAppService
         }
     }
 
-    /**
-     * Staff: Cancellation
-     */
     public function sendStaffCancellationNotification($phone, $booking)
     {
         if (empty($phone)) return false;
         $branchId      = $booking->branch_id ?? null;
         $therapistName = $booking->therapist?->name ?? 'Terapis';
+        $email         = $booking->therapist?->email ?? null;
         $vars          = $this->resolveSystemVars($booking);
 
-        $sent = $this->sendMappedTemplate('staff_cancellation', $phone, $therapistName, $vars);
+        $sent = $this->sendMappedTemplate('staff_cancellation', $phone, $therapistName, $vars, null, $email);
 
         if (!$sent) {
             $date         = $this->formatIndonesianDate($booking->booking_date);
@@ -652,7 +613,7 @@ class WhatsAppService
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // PROMO & BIRTHDAY (pakai endpoint lama)
+    // PROMO & BIRTHDAY
     // ─────────────────────────────────────────────────────────────────────────
 
     public function sendBirthdayGreeting($phone, $customerName, $discount = '30%', $expiryDate = null)
