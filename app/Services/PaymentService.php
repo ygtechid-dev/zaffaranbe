@@ -756,7 +756,7 @@ class PaymentService
     /**
      * Process a confirmed successful payment (Create booking, record transaction, notify)
      */
-   public function processSuccessfulPayment(Payment $payment)
+public function processSuccessfulPayment(Payment $payment)
 {
     Log::info("processSuccessfulPayment starting for Payment ID: {$payment->id}, Status: {$payment->status}");
 
@@ -873,22 +873,22 @@ class PaymentService
                 // Create Booking Items + Notify Staff + Notify Guest per item
                 foreach ($items as $index => $item) {
                     \App\Models\BookingItem::create([
-                        'booking_id'  => $booking->id,
-                        'service_id'  => $item['service_id'] ?? null,
-                        'therapist_id'=> $item['therapist_id'] ?? null,
-                        'room_id'     => $item['room_id'] ?? null,
-                        'price'       => $item['service_price'],
-                        'room_charge' => $item['room_charge'] ?? 0,
-                        'duration'    => $item['duration'],
-                        'start_time'  => $item['start_time'],
-                        'end_time'    => $item['end_time'],
-                        'guest_name'  => $item['guest_name'] ?? null,
-                        'guest_phone' => $item['guest_phone'] ?? null,
-                        'guest_type'  => $item['guest_type'] ?? 'dewasa',
-                        'guest_age'   => $item['guest_age'] ?? null,
+                        'booking_id'   => $booking->id,
+                        'service_id'   => $item['service_id'] ?? null,
+                        'therapist_id' => $item['therapist_id'] ?? null,
+                        'room_id'      => $item['room_id'] ?? null,
+                        'price'        => $item['service_price'],
+                        'room_charge'  => $item['room_charge'] ?? 0,
+                        'duration'     => $item['duration'],
+                        'start_time'   => $item['start_time'],
+                        'end_time'     => $item['end_time'],
+                        'guest_name'   => $item['guest_name'] ?? null,
+                        'guest_phone'  => $item['guest_phone'] ?? null,
+                        'guest_type'   => $item['guest_type'] ?? 'dewasa',
+                        'guest_age'    => $item['guest_age'] ?? null,
                     ]);
 
-                    // Resolve therapist untuk item ini (tidak harus punya phone)
+                    // Resolve therapist untuk item ini
                     $therapist = \App\Models\Therapist::find($item['therapist_id'] ?? 0);
 
                     // Notify Staff — hanya kalau therapist ada & punya phone
@@ -929,6 +929,7 @@ class PaymentService
                         try {
                             $this->whatsappService->sendBookingSuccess($guestPhone, [
                                 'customer_name'  => $item['guest_name'] ?? 'Tamu',
+                                'email'          => $item['guest_email'] ?? null, // ← tambah
                                 'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
                                 'branch_id'      => $booking->branch_id,
                                 'booking_ref'    => $booking->booking_ref ?? '-',
@@ -963,6 +964,7 @@ class PaymentService
                     try {
                         $this->whatsappService->sendBookingSuccess($phone, [
                             'customer_name'  => $booking->user->name ?? ($data['customer_name'] ?? 'Pelanggan'),
+                            'email'          => $booking->user?->email ?? ($data['customer_email'] ?? null), // ← tambah
                             'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
                             'branch_id'      => $booking->branch_id,
                             'booking_ref'    => $booking->booking_ref ?? '-',
@@ -970,7 +972,7 @@ class PaymentService
                             'date'           => \Carbon\Carbon::parse($booking->booking_date)->format('d F Y'),
                             'time'           => substr($items[0]['start_time'] ?? $booking->start_time, 0, 5) . ' WIB',
                             'service'        => ($items[0]['service_name'] ?? $booking->service?->name ?? 'Treatment')
-                                                . (count($items) > 1 ? ' (' . count($items) . ' Guests)' : ''),
+                                               . (count($items) > 1 ? ' (' . count($items) . ' Guests)' : ''),
                             'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
                         ]);
                     } catch (\Exception $e) {
