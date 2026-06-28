@@ -870,6 +870,15 @@ public function processSuccessfulPayment(Payment $payment)
 
                 $firstBooking = $booking;
 
+                // ─── Resolve email customer di sini — sebelum loop ───────────────
+                // Prioritas: relasi user → $data['customer_email'] → cari dari tabel users pakai user_id
+                $customerEmail = $booking->user?->email ?? ($data['customer_email'] ?? null);
+                if (!$customerEmail && !empty($data['user_id'])) {
+                    $userFromData  = \App\Models\User::find($data['user_id']);
+                    $customerEmail = $userFromData?->email;
+                }
+                Log::info("Resolved customer email", ['email' => $customerEmail ?? 'null']);
+
                 // Create Booking Items + Notify Staff + Notify Guest per item
                 foreach ($items as $index => $item) {
                     \App\Models\BookingItem::create([
@@ -929,7 +938,7 @@ public function processSuccessfulPayment(Payment $payment)
                         try {
                             $this->whatsappService->sendBookingSuccess($guestPhone, [
                                 'customer_name'  => $item['guest_name'] ?? 'Tamu',
-                                'email'          => $item['guest_email'] ?? null, // ← tambah
+                                'email'          => $item['guest_email'] ?? $customerEmail ?? null,
                                 'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
                                 'branch_id'      => $booking->branch_id,
                                 'booking_ref'    => $booking->booking_ref ?? '-',
@@ -964,7 +973,7 @@ public function processSuccessfulPayment(Payment $payment)
                     try {
                         $this->whatsappService->sendBookingSuccess($phone, [
                             'customer_name'  => $booking->user->name ?? ($data['customer_name'] ?? 'Pelanggan'),
-                            'email'          => $booking->user?->email ?? ($data['customer_email'] ?? null), // ← tambah
+                            'email'          => $customerEmail,
                             'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
                             'branch_id'      => $booking->branch_id,
                             'booking_ref'    => $booking->booking_ref ?? '-',
