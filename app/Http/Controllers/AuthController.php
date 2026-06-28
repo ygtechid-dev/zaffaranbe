@@ -102,6 +102,11 @@ class AuthController extends Controller
 
         $this->whatsappService->sendOtp($user->phone, $otp);
 
+        // Kirim OTP ke email juga
+        if ($user->email) {
+            $this->sendOtpEmail($user->email, $otp, $user->name);
+        }
+
         $token = JWTAuth::fromUser($user);
 
         return response()->json([
@@ -253,7 +258,12 @@ class AuthController extends Controller
 
         $this->whatsappService->sendOtp($user->phone, $otp);
 
-        return response()->json(['message' => 'OTP has been resent']);
+        // Kirim OTP ke email juga
+        if ($user->email) {
+            $this->sendOtpEmail($user->email, $otp, $user->name);
+        }
+
+        return response()->json(['message' => 'OTP has been resent to WhatsApp and email']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
