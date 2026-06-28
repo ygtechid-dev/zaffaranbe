@@ -206,7 +206,7 @@ class WhatsAppService
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // SEND TEXT (legacy — fallback & OTP/Welcome)
+    // SEND TEXT (legacy — fallback & Welcome)
     // ─────────────────────────────────────────────────────────────────────────
 
     public function sendMessage($phone, $message, $branchId = null)
@@ -231,30 +231,43 @@ class WhatsAppService
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // OTP & WELCOME
+    // OTP — pakai smart-send template otpzafaran, fallback ke endpoint lama
     // ─────────────────────────────────────────────────────────────────────────
 
     public function sendOtp($phone, $otp)
     {
         if (empty($phone)) return false;
-        $phone = $this->formatPhone($phone);
-        $this->loadConfig();
 
-        try {
-            $response = Http::withToken($this->token)
-                ->post($this->baseUrl . '/api/messages/otp', [
-                    'phone'        => $phone,
-                    'otp_code'     => (string) $otp,
-                    'button_param' => (string) $otp
-                ]);
+        // Pakai smart-send dengan template otpzafaran
+        $sent = $this->sendMappedTemplate('auth_forgot_password_otp', $phone, 'Pelanggan', [
+            'otp_code' => (string) $otp,
+        ]);
 
-            Log::info("WhatsApp OTP Response: " . $response->body());
-            return $response->successful();
-        } catch (\Exception $e) {
-            Log::error("WhatsApp OTP Failed: " . $e->getMessage());
-            return false;
+        // Fallback ke endpoint lama kalau smart-send gagal / belum dikonfigurasi
+        if (!$sent) {
+            $this->loadConfig();
+            try {
+                $response = Http::withToken($this->token)
+                    ->post($this->baseUrl . '/api/messages/otp', [
+                        'phone'        => $this->formatPhone($phone),
+                        'otp_code'     => (string) $otp,
+                        'button_param' => (string) $otp
+                    ]);
+
+                Log::info("WhatsApp OTP Fallback Response: " . $response->body());
+                return $response->successful();
+            } catch (\Exception $e) {
+                Log::error("WhatsApp OTP Fallback Failed: " . $e->getMessage());
+                return false;
+            }
         }
+
+        return true;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // WELCOME
+    // ─────────────────────────────────────────────────────────────────────────
 
     public function sendWelcome($phone, $customerName, $branchName = 'Zafaran Spa')
     {
