@@ -508,31 +508,35 @@ class WhatsAppService
         return $sent;
     }
 
-    public function sendReviewRequest($phone, $booking)
-    {
-        if (empty($phone)) return false;
-        $branchId     = $booking->branch_id ?? null;
-        $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
-        $email        = $booking->user?->email ?? null;
-        $reviewLink   = env('APP_URL') . '/review/' . ($booking->booking_ref ?? $booking->id);
+   public function sendReviewRequest($phone, $booking)
+{
+    if (empty($phone)) return false;
+    $branchId     = $booking->branch_id ?? null;
+    $customerName = $booking->user?->name ?? ($booking->guest_name ?? 'Pelanggan');
+    $email        = $booking->user?->email ?? null;
+    $reviewLink   = env('APP_URL') . '/review/' . ($booking->booking_ref ?? $booking->id);
 
-        $vars = $this->resolveSystemVars($booking, ['review_link' => $reviewLink]);
+    $vars = $this->resolveSystemVars($booking, ['review_link' => $reviewLink]);
 
-        $sent = $this->sendMappedTemplate('customer_review', $phone, $customerName, $vars, null, $email);
+    $sent = $this->sendMappedTemplate('customer_review', $phone, $customerName, $vars, null, $email);
 
-        if (!$sent) {
-            $data = [
-                'customer'    => $booking->user ?? (object)['name' => $customerName],
-                'booking'     => $booking,
-                'branch'      => $booking->branch,
-                'review_link' => $reviewLink
-            ];
-            $parsed = $this->notificationTemplateService->parseTemplate('review_request', $data, $branchId);
-            if ($parsed) {
-                $this->sendMessage($phone, $parsed['message'], $branchId);
-            }
+    if (!$sent) {
+        $data = [
+            'customer'    => $booking->user ?? (object)['name' => $customerName],
+            'booking'     => $booking,
+            'branch'      => $booking->branch,
+            'review_link' => $reviewLink
+        ];
+        $parsed = $this->notificationTemplateService->parseTemplate('review_request', $data, $branchId);
+        if ($parsed) {
+            $fallback = $this->sendMessage($phone, $parsed['message'], $branchId);
+            return $fallback; // ✅ return hasil fallback
         }
+        return false; // ✅ kalau parsed null pun return false
     }
+
+    return true;
+}
 
     // ─────────────────────────────────────────────────────────────────────────
     // STAFF NOTIFICATIONS
