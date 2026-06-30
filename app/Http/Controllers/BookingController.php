@@ -152,11 +152,29 @@ public function getTherapistAvailability(Request $request)
                 $q->where('is_active', true)
                     ->where(function ($q2) use ($date, $dayOfWeek) {
                         $q2->where('date', $date)
-                            ->orWhere(function ($q3) use ($dayOfWeek) {
-                                $q3->whereNull('date')->where('day_of_week', $dayOfWeek);
+                            ->orWhere(function ($q3) use ($date, $dayOfWeek) {
+                                $q3->whereNull('date')
+                                    ->where('day_of_week', $dayOfWeek)
+                                    ->where(function ($q4) use ($date) {
+                                        $q4->whereNull('start_date')
+                                            ->orWhere('start_date', '<=', $date);
+                                    })
+                                    ->where(function ($q5) use ($date) {
+                                        $q5->whereNull('end_date')
+                                            ->orWhere('end_date', '>=', $date);
+                                    });
                             })
-                            ->orWhere(function ($q4) {
-                                $q4->whereNull('date')->where('day_of_week', 'daily');
+                            ->orWhere(function ($q4) use ($date) {
+                                $q4->whereNull('date')
+                                    ->where('day_of_week', 'daily')
+                                    ->where(function ($q5) use ($date) {
+                                        $q5->whereNull('start_date')
+                                            ->orWhere('start_date', '<=', $date);
+                                    })
+                                    ->where(function ($q6) use ($date) {
+                                        $q6->whereNull('end_date')
+                                            ->orWhere('end_date', '>=', $date);
+                                    });
                             });
                     });
             }
@@ -355,11 +373,29 @@ public function getTherapistAvailability(Request $request)
                 $query->where('is_active', true)
                     ->where(function ($q2) use ($dateStr, $dayOfWeek) {
                         $q2->where('date', $dateStr)
-                            ->orWhere(function ($q3) use ($dayOfWeek) {
-                                $q3->whereNull('date')->where('day_of_week', $dayOfWeek);
+                            ->orWhere(function ($q3) use ($dateStr, $dayOfWeek) {
+                                $q3->whereNull('date')
+                                    ->where('day_of_week', $dayOfWeek)
+                                    ->where(function ($q4) use ($dateStr) {
+                                        $q4->whereNull('start_date')
+                                            ->orWhere('start_date', '<=', $dateStr);
+                                    })
+                                    ->where(function ($q5) use ($dateStr) {
+                                        $q5->whereNull('end_date')
+                                            ->orWhere('end_date', '>=', $dateStr);
+                                    });
                             })
-                            ->orWhere(function ($q4) {
-                                $q4->whereNull('date')->where('day_of_week', 'daily');
+                            ->orWhere(function ($q4) use ($dateStr) {
+                                $q4->whereNull('date')
+                                    ->where('day_of_week', 'daily')
+                                    ->where(function ($q5) use ($dateStr) {
+                                        $q5->whereNull('start_date')
+                                            ->orWhere('start_date', '<=', $dateStr);
+                                    })
+                                    ->where(function ($q6) use ($dateStr) {
+                                        $q6->whereNull('end_date')
+                                            ->orWhere('end_date', '>=', $dateStr);
+                                    });
                             });
                     });
             }
@@ -723,7 +759,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
         $finalDuration = count($processedItems) > 0 ? $processedItems[0]['duration'] : null;
         $finalServicePrice = count($processedItems) > 0 ? $processedItems[0]['service_price'] : 0;
 
-        $timeoutMinutes = $companySettings ? ($companySettings->payment_timeout ?? 15) : 15;
+        $timeoutMinutes = $companySettings ? ($companySettings->payment_timeout ?? 30) : 30;
 
         // Calculate unique guest count
         $uniqueGuests = [];

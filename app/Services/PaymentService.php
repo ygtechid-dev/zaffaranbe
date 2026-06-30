@@ -141,7 +141,7 @@ class PaymentService
         $methodUpper = strtoupper($method);
         if ($methodUpper === 'QRIS' || $methodUpper === 'qris') {
             $mockData['qr_code_url'] = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' . urlencode($payment->payment_ref);
-            $mockData['expiry_time'] = Carbon::now()->addMinutes(15)->toIso8601String();
+            $mockData['expiry_time'] = Carbon::now()->addMinutes(30)->toIso8601String();
         } else {
             // Virtual Account
             $mockData['va_number'] = '8800' . str_pad($model->id, 12, '0', STR_PAD_LEFT);
@@ -151,7 +151,7 @@ class PaymentService
                 $bank = str_replace('VIRTUAL_ACCOUNT_', '', $methodUpper);
             }
             $mockData['bank'] = $bank;
-            $mockData['expiry_time'] = Carbon::now()->addHours(24)->toIso8601String();
+            $mockData['expiry_time'] = Carbon::now()->addMinutes(30)->toIso8601String();
         }
 
         $payment->update(['payment_data' => json_encode($mockData)]);
@@ -429,7 +429,7 @@ class PaymentService
                             'invoice_number' => $payment->payment_ref,
                         ],
                         'qris_info' => [
-                            'expired_time' => 60,
+                            'expired_time' => 30,
                             'reusable_status' => false,
                         ],
                         'customer' => [
@@ -444,7 +444,7 @@ class PaymentService
                             'invoice_number' => $payment->payment_ref,
                         ],
                         'virtual_account_info' => [
-                            'expired_time' => 60,
+                            'expired_time' => 30,
                             'reusable_status' => false,
                         ],
                         'customer' => [
@@ -464,7 +464,7 @@ class PaymentService
                         'line_items' => $lineItems
                     ],
                     'payment' => [
-                        'payment_due_date' => 30, // 60 minutes
+                        'payment_due_date' => 30,
                     ],
                     'customer' => [
                         'name' => $this->sanitizeDokuString(substr($customerName, 0, 50)), // DOKU limit

@@ -172,7 +172,7 @@ class PaymentController extends Controller
             $paymentLog = \App\Models\PaymentLog::create([
                 'booking_data' => array_merge($request->all(), ['is_pos' => true]),
                 'status' => 'pending',
-                'expired_at' => \Carbon\Carbon::now()->addHours(1)
+                'expired_at' => \Carbon\Carbon::now()->addMinutes(30)
             ]);
         }
 
@@ -180,6 +180,20 @@ class PaymentController extends Controller
             $model = $booking ?: $paymentLog;
             $amount = (float) $request->amount;
             $paymentType = $request->payment_type;
+
+            if ($booking && $booking->payment_status === 'unpaid') {
+                $settings = \App\Models\CompanySettings::where('branch_id', $booking->branch_id)->first();
+                if (!$settings) {
+                    $settings = \App\Models\CompanySettings::whereNull('branch_id')->first();
+                }
+
+                $timeoutMinutes = $settings ? ($settings->payment_timeout ?? 30) : 30;
+                $booking->update([
+                    'status' => 'awaiting_payment',
+                    'expires_at' => \Carbon\Carbon::now()->addMinutes($timeoutMinutes),
+                ]);
+                $booking->refresh();
+            }
 
             // Validation: check if service price < DP amount for down_payment type
             if ($paymentType === 'down_payment') {

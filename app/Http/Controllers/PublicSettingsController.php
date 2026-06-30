@@ -29,7 +29,7 @@ class PublicSettingsController extends Controller
                 'tax_percentage'            => 0,
                 'service_charge_percentage' => 0,
                 'min_dp'                    => 0,
-                'payment_timeout'           => 15,
+                'payment_timeout'           => 30,
             ]);
         }
 
@@ -40,7 +40,7 @@ class PublicSettingsController extends Controller
             'tax_percentage'            => (float) ($settings->tax_percentage ?? 0),
             'service_charge_percentage' => (float) ($settings->service_charge_percentage ?? 0),
             'min_dp'                    => (int) ($settings->min_dp ?? 0),
-            'payment_timeout'           => (int) ($settings->payment_timeout ?? 15),
+            'payment_timeout'           => (int) ($settings->payment_timeout ?? 30),
         ]);
     }
 }
