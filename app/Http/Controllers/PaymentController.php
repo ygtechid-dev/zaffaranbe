@@ -182,15 +182,9 @@ class PaymentController extends Controller
             $paymentType = $request->payment_type;
 
             if ($booking && $booking->payment_status === 'unpaid') {
-                $settings = \App\Models\CompanySettings::where('branch_id', $booking->branch_id)->first();
-                if (!$settings) {
-                    $settings = \App\Models\CompanySettings::whereNull('branch_id')->first();
-                }
-
-                $timeoutMinutes = $settings ? ($settings->payment_timeout ?? 30) : 30;
                 $booking->update([
                     'status' => 'awaiting_payment',
-                    'expires_at' => \Carbon\Carbon::now()->addMinutes($timeoutMinutes),
+                    'expires_at' => \Carbon\Carbon::now()->addMinutes(30),
                 ]);
                 $booking->refresh();
             }
@@ -298,6 +292,13 @@ class PaymentController extends Controller
             'gateway' => env('PAYMENT_GATEWAY')
         ]);
 
+        // Heal a successful payment whose booking was not finalized by the
+        // gateway callback (for example, a callback/timeout race).
+        if ($payment->status === 'success' && $payment->payment_log_id && !$payment->booking_id) {
+            $this->paymentService->processSuccessfulPayment($payment);
+            $payment = $payment->fresh();
+        }
+
         // Check if payment might be Doku related or using common methods handled by Doku
         $isDokuPayment = str_contains($payment->payment_method, 'doku') ||
             env('PAYMENT_GATEWAY') === 'doku' ||
@@ -334,6 +335,7 @@ class PaymentController extends Controller
             'payment_ref' => $payment->payment_ref,
             'status' => $payment->status,
             'payment_status' => $bookingPaymentStatus, // Add booking payment status
+            'booking_id' => $payment->booking_id,
             'amount' => $payment->amount,
             'method' => $payment->payment_method,
             'type' => $payment->payment_type,
@@ -344,6 +346,17 @@ class PaymentController extends Controller
         Log::info('Payment Status Response', $response);
 
         return response()->json($response);
+    }
+
+    public function statusByReference($reference)
+    {
+        $payment = Payment::where('payment_ref', $reference)->first();
+
+        if (!$payment) {
+            return response()->json(['error' => 'Payment not found'], 404);
+        }
+
+        return $this->status($payment->id);
     }
 
     /**

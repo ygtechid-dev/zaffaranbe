@@ -190,6 +190,7 @@ $router->get('settings/public', 'PublicSettingsController@index');
         $router->group(['prefix' => 'payments'], function () use ($router) {
             $router->get('/config', 'PaymentController@getConfig');
             $router->post('/initiate', 'PaymentController@initiate');
+            $router->get('/status/reference/{reference}', 'PaymentController@statusByReference');
             $router->get('/status/{id}', 'PaymentController@status');
             $router->post('/mock-confirm', 'PaymentController@mockConfirm'); // For testing
         });
@@ -841,5 +842,4 @@ $router->group(['middleware' => ['auth', 'role:admin,owner,super_admin'], 'prefi
     $router->put('/leads/{id}', 'LeadController@update');
     $router->delete('/leads/{id}', 'LeadController@destroy');
 });
-
 

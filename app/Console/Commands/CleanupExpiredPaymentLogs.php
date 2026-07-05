@@ -39,10 +39,13 @@ class CleanupExpiredPaymentLogs extends Command
         $expiredBookingsCount = Booking::where('payment_status', 'unpaid')
             ->whereNotNull('expires_at')
             ->where('expires_at', '<', Carbon::now())
-            ->where('status', '!=', 'cancelled')
+            ->whereIn('status', ['pending_payment', 'awaiting_payment'])
+            ->whereDoesntHave('payments', function ($query) {
+                $query->whereIn('status', ['success', 'paid', 'settlement']);
+            })
             ->update([
                 'status' => 'cancelled',
-                'cancellation_reason' => 'Auto-cancelled: Payment not completed within time limit',
+                'cancellation_reason' => 'Auto-cancelled: DP/Lunas belum dibayar dalam 30 menit',
                 'cancelled_at' => Carbon::now(),
             ]);
 

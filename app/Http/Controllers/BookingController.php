@@ -759,7 +759,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
         $finalDuration = count($processedItems) > 0 ? $processedItems[0]['duration'] : null;
         $finalServicePrice = count($processedItems) > 0 ? $processedItems[0]['service_price'] : 0;
 
-        $timeoutMinutes = $companySettings ? ($companySettings->payment_timeout ?? 30) : 30;
+        $timeoutMinutes = 30;
 
         // Calculate unique guest count
         $uniqueGuests = [];
@@ -837,7 +837,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
         // Limitation: PaymentLog table might need user_id column for efficient querying.
         // For now, let's assume we can fetch recent pending logs and filter in PHP (acceptable for small scale).
 
-        $pendingLogs = PaymentLog::where('status', 'pending')
+        $pendingLogs = PaymentLog::whereIn('status', ['pending', 'expired'])
             ->orderBy('id', 'desc')
             ->limit(20) // Limit to avoid scanning too many
             ->get()
@@ -852,7 +852,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             // Check formatted status based on expiration
             $isExpired = \Carbon\Carbon::parse($log->expired_at)->isPast();
             $status = $isExpired ? 'cancelled' : 'awaiting_payment';
-            $cancellationReason = $isExpired ? 'Payment Time Expired' : null;
+            $cancellationReason = $isExpired ? 'DP/Lunas belum dibayar dalam 30 menit' : null;
 
             $booking = new Booking([
                 'id' => $log->id,
@@ -1314,7 +1314,7 @@ return response()->json($booking);
             'service_price' => $data['service_price'] ?? 0,
             'room_charge' => $data['room_charge'] ?? 0,
             'notes' => $data['notes'] ?? null,
-            'cancellation_reason' => $isExpired ? 'Payment Time Expired' : null,
+            'cancellation_reason' => $isExpired ? 'DP/Lunas belum dibayar dalam 30 menit' : null,
             'cancelled_at' => $isExpired ? $log->expired_at : null,
             'branch' => \App\Models\Branch::find($data['branch_id'] ?? 0),
             'service' => \App\Models\Service::find($data['service_id'] ?? 0),

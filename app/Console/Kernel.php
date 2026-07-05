@@ -14,6 +14,7 @@ class Kernel extends ConsoleKernel
      */
     protected $commands = [
         Commands\CleanupExpiredPaymentLogs::class,
+        Commands\ReconcileSuccessfulPayments::class,
         Commands\SendBookingReminders::class,
         Commands\SendReviewRequests::class,
         Commands\ProcessAutomations::class,
@@ -31,6 +32,7 @@ class Kernel extends ConsoleKernel
    protected function schedule(Schedule $schedule)
 {
     $schedule->command('payment:cleanup')->everyMinute();
+    $schedule->command('payment:reconcile-successful')->everyMinute()->withoutOverlapping();
     $schedule->command('reminders:send --type=h1')->dailyAt('21:00');
     $schedule->command('reminders:send --type=2h')->hourly();
 $schedule->command('reviews:request')->dailyAt('20:00');

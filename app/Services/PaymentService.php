@@ -760,18 +760,26 @@ public function processSuccessfulPayment(Payment $payment)
 {
     Log::info("processSuccessfulPayment starting for Payment ID: {$payment->id}, Status: {$payment->status}");
 
-    if ($payment->status !== 'success') {
-        Log::warning("processSuccessfulPayment early return: status is not success", ['status' => $payment->status]);
-        return;
-    }
-
     DB::beginTransaction();
     try {
-        if ($payment->payment_log_id) {
-            $log = $payment->paymentLog;
+        // Serialize webhook and status-check reconciliation so a paid draft can
+        // only create one booking, even when both requests arrive together.
+        $payment = Payment::whereKey($payment->id)->lockForUpdate()->firstOrFail();
+
+        if ($payment->status !== 'success') {
+            Log::warning("processSuccessfulPayment early return: status is not success", ['status' => $payment->status]);
+            DB::commit();
+            return;
+        }
+
+        if ($payment->payment_log_id && !$payment->booking_id) {
+            $log = PaymentLog::whereKey($payment->payment_log_id)->lockForUpdate()->first();
             Log::info("Found PaymentLog ID: " . ($log ? $log->id : 'NULL') . " with status: " . ($log ? $log->status : 'N/A'));
 
-            if ($log && $log->status === 'pending') {
+            if ($log) {
+                // A gateway can confirm payment just after the local timeout job
+                // marks the draft expired. Gateway success is authoritative, so
+                // restore and finalize the paid draft instead of losing it.
                 $log->update(['status' => 'settlement']);
                 Log::info("PaymentLog {$log->id} updated to settlement");
                 $data = $log->booking_data;
@@ -884,6 +892,7 @@ public function processSuccessfulPayment(Payment $payment)
                     \App\Models\BookingItem::create([
                         'booking_id'   => $booking->id,
                         'service_id'   => $item['service_id'] ?? null,
+                        'service_variant_id' => $item['variant_id'] ?? null,
                         'therapist_id' => $item['therapist_id'] ?? null,
                         'room_id'      => $item['room_id'] ?? null,
                         'price'        => $item['service_price'],
@@ -1013,11 +1022,12 @@ public function processSuccessfulPayment(Payment $payment)
                     $updateData['payment_status'] = 'partial';
                 }
 
-                if ($booking->status === 'pending_payment') {
+                if (in_array($booking->status, ['pending_payment', 'awaiting_payment'])) {
                     $updateData['status'] = 'confirmed';
                     $updateData['confirmed_at'] = Carbon::now();
                 }
 
+                $updateData['expires_at'] = null;
                 $booking->update($updateData);
 
                 $this->recordTransaction($payment, $booking, [
@@ -1059,8 +1069,17 @@ public function processSuccessfulPayment(Payment $payment)
             throw new \Exception('Payment not found: ' . $invoiceNumber);
         }
 
-        // 2. Idempotency Check: Don't process if already in final state
-        if (in_array($payment->status, ['success', 'failed', 'expired'])) {
+        // Retry/reconcile a paid draft if an earlier callback updated the
+        // payment but booking creation did not finish.
+        if ($payment->status === 'success') {
+            if ($payment->payment_log_id && !$payment->booking_id) {
+                $this->processSuccessfulPayment($payment);
+            }
+            return $payment->fresh();
+        }
+
+        // Other final states do not need more processing.
+        if (in_array($payment->status, ['failed', 'expired'])) {
             return $payment;
         }
 
@@ -1361,7 +1380,11 @@ public function processSuccessfulPayment(Payment $payment)
                     'type' => $item['type'] ?? ($item['product_id'] ?? false ? 'product' : 'service'),
                     'service_id' => $item['service_id'] ?? ($item['type'] === 'service' ? ($booking->service_id ?? null) : null),
                     'product_id' => $item['product_id'] ?? null,
-                    'variant_id' => $item['variant_id'] ?? null,
+                    // transaction_items.variant_id points to product_variants.
+                    // Service variants are stored on booking_items instead.
+                    'variant_id' => ($item['type'] ?? null) === 'product'
+                        ? ($item['variant_id'] ?? null)
+                        : null,
                     'therapist_id' => $item['therapist_id'] ?? ($booking->therapist_id ?? null),
                     'quantity' => $item['quantity'] ?? 1,
                     'price' => $item['price'] ?? 0,
