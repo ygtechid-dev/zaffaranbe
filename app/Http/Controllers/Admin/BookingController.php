@@ -118,16 +118,9 @@ class BookingController extends Controller
 
     $updateData = ['status' => $request->status];
 
-   if ($request->status === 'completed') {
+    if ($request->status === 'completed') {
         $updateData['completed_at'] = Carbon::now();
         $this->recordCommission($booking);
-
-        // Notify Customer: Review Request
-        $customer = $booking->user;
-        $phone = $customer ? $customer->phone : ($booking->guest_phone ?? null);
-        if ($phone) {
-            $this->whatsappService->sendReviewRequest($phone, $booking);
-        }
     // SESUDAH
     } elseif ($request->status === 'cancelled') {
         $updateData['cancelled_at'] = Carbon::now();
@@ -1430,12 +1423,6 @@ class BookingController extends Controller
             // Record Commission
            $this->recordCommission($sourceBooking);
 
-            // Notify Customer: Review Request
-            $customer = $sourceBooking->user;
-            $phone = $customer ? $customer->phone : ($sourceBooking->guest_phone ?? null);
-            if ($phone) {
-                $this->whatsappService->sendReviewRequest($phone, $sourceBooking);
-            }
             AuditLog::log('update', 'Reservasi Item', "Completed only item {$itemId} in booking REF: {$sourceBooking->booking_ref}");
 
             return response()->json([
@@ -1487,14 +1474,6 @@ class BookingController extends Controller
 
         // Record Commission
          $this->recordCommission($newBooking);
-
-        // Notify Customer: Review Request
-        $customer = $newBooking->user;
-        $phone = $customer ? $customer->phone : ($newBooking->guest_phone ?? null);
-        if ($phone) {
-            $this->whatsappService->sendReviewRequest($phone, $newBooking);
-        }
-
 
         AuditLog::log('update', 'Reservasi Item', "Completed item {$itemId} from booking REF: {$sourceBooking->booking_ref}");
 

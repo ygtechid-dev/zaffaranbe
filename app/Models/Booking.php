@@ -39,6 +39,7 @@ class Booking extends Model
         'expires_at',
         'is_blocked',
         'block_reason',
+        'is_review_requested',
         'notes',
         'confirmed_at',
         'completed_at',
@@ -95,7 +96,8 @@ class Booking extends Model
         'cancelled_at' => 'datetime',
         'expires_at' => 'datetime',
         'is_blocked' => 'boolean',
-          'is_rescheduled' => 'boolean'
+        'is_review_requested' => 'boolean',
+        'is_rescheduled' => 'boolean'
     ];
 
     protected static function boot()

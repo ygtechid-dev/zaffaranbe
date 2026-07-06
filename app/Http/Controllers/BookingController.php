@@ -816,12 +816,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             'message' => 'Booking initiated, awaiting payment',
             'payment_log_id' => $paymentLog->id,
             'expired_at' => $paymentLog->expired_at,
-            // Mock a booking object for frontend compatibility if needed
-            'booking' => [
-                'id' => 'PL-' . $paymentLog->id,
-                'status' => 'awaiting_payment',
-                'payment_status' => 'unpaid',
-            ]
+            'booking' => null,
         ], 201);
     }
 
@@ -830,71 +825,9 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
      */
     public function index(Request $request)
     {
-        // 1. Get Pending Logs (Temporary Bookings) that belong to this user
-        // We can't query JSON column efficiently in all DBs, but for filtered user_id we can simply check in loop or assuming logged in user created them.
-        // Actually PaymentLog doesn't have user_id column, it's inside JSON. 
-        // But usually we filter by session or we need to rely on the fact that only user's logs are relevant.
-        // Limitation: PaymentLog table might need user_id column for efficient querying.
-        // For now, let's assume we can fetch recent pending logs and filter in PHP (acceptable for small scale).
-
-        $pendingLogs = PaymentLog::whereIn('status', ['pending', 'expired'])
-            ->orderBy('id', 'desc')
-            ->limit(20) // Limit to avoid scanning too many
-            ->get()
-            ->filter(function ($log) {
-                return isset($log->booking_data['user_id']) && $log->booking_data['user_id'] == auth()->id();
-            });
-
-        // Map logs to Booking structure
-        $pendingBookings = $pendingLogs->map(function ($log) {
-            $data = $log->booking_data;
-
-            // Check formatted status based on expiration
-            $isExpired = \Carbon\Carbon::parse($log->expired_at)->isPast();
-            $status = $isExpired ? 'cancelled' : 'awaiting_payment';
-            $cancellationReason = $isExpired ? 'DP/Lunas belum dibayar dalam 30 menit' : null;
-
-            $booking = new Booking([
-                'id' => $log->id,
-            ]);
-
-            $recentPayment = \App\Models\Payment::where('payment_log_id', $log->id)
-                ->orderBy('created_at', 'desc')
-                ->first();
-
-    
-            $booking->forceFill([
-                'id' => 99900000 + $log->id,
-                'status' => $status,
-                'payment_status' => $recentPayment && $recentPayment->status === 'success' ? 'paid' : ($isExpired ? 'failed' : 'unpaid'),
-                'booking_date' => $data['booking_date'] ?? null,
-                'start_time' => $data['start_time'] ?? null,
-                'end_time' => $data['end_time'] ?? null,
-                'total_price' => $data['total_price'] ?? 0,
-                'service_price' => $data['service_price'] ?? 0,
-                'room_charge' => $data['room_charge'] ?? 0,
-                'notes' => $data['notes'] ?? null,
-                'cancellation_reason' => $cancellationReason,
-                'cancelled_at' => $isExpired ? $log->expired_at : null,
-                'branch' => \App\Models\Branch::find($data['branch_id'] ?? 0),
-                'service' => \App\Models\Service::find($data['service_id'] ?? 0),
-                'therapist' => \App\Models\Therapist::find($data['therapist_id'] ?? 0),
-                'room' => \App\Models\Room::find($data['room_id'] ?? 0),
-                'therapist_id' => $data['therapist_id'] ?? null,
-                'branch_id' => $data['branch_id'] ?? null,
-                'service_id' => $data['service_id'] ?? null,
-                'room_id' => $data['room_id'] ?? null,
-                'created_at' => $log->created_at,
-                'expires_at' => $log->expired_at,
-                'is_pending_log' => true,
-                'payment_log_id' => $log->id,
-                'recent_payment_id' => $recentPayment ? $recentPayment->id : null,
-                    'product_items' => $data['product_items'] ?? [],  // TAMBAH INI
-
-            ]);
-
-            return $booking;
-        });
+        // Draft payment logs are not bookings. They only become visible here
+        // after a successful DP/full payment creates a real booking record.
+        $pendingBookings = collect();
 
         // Filter pending bookings based on requested status (if any)
         if ($request->has('status')) {
@@ -913,7 +846,8 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
 
         // 2. Get Real Bookings
         $query = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'transaction', 'feedback', 'items.service', 'items.therapist', 'items.room'])
-            ->where('user_id', auth()->id());
+            ->where('user_id', auth()->id())
+            ->whereIn('payment_status', ['partial', 'paid']);
 
         if ($request->has('status')) {
             $statuses = explode(',', $request->status);
@@ -988,27 +922,14 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
      */
     public function show($id)
     {
-        // Handle PaymentLog synthetic ID (Drafts)
+        // Draft payment logs are not bookings and should not be exposed as one.
         if ($id >= 99900000) {
-            $logId = $id - 99900000;
-            $log = \App\Models\PaymentLog::find($logId);
-
-            if (!$log) {
-                return response()->json(['error' => 'Booking not found'], 404);
-            }
-
-            // Allow user to view their own log
-            $bookingData = $log->booking_data;
-            if (($bookingData['user_id'] ?? null) != auth()->id()) {
-                return response()->json(['error' => 'Unauthorized'], 403);
-            }
-
-            $booking = $this->mapLogToBooking($log);
-            return response()->json($booking);
+            return response()->json(['error' => 'Booking not found'], 404);
         }
 
        $booking = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.therapist', 'items.room'])
     ->where('user_id', auth()->id())
+    ->whereIn('payment_status', ['partial', 'paid'])
     ->findOrFail($id);
 
 $recentPayment = $booking->payments->sortByDesc('created_at')->first();
