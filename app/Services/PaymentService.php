@@ -1112,6 +1112,8 @@ public function processSuccessfulPayment(Payment $payment)
         } else if ($payment->booking_id) {
             $booking = $payment->booking;
             if ($booking) {
+                $wasUnpaid = $booking->payment_status === 'unpaid';
+
                 $totalPaid = Payment::where('booking_id', $booking->id)
                     ->where('status', 'success')
                     ->sum('amount');
@@ -1131,6 +1133,7 @@ public function processSuccessfulPayment(Payment $payment)
 
                 $updateData['expires_at'] = null;
                 $booking->update($updateData);
+                $booking->refresh();
 
                 $this->recordTransaction($payment, $booking, [
                     'items' => [
@@ -1143,6 +1146,10 @@ public function processSuccessfulPayment(Payment $payment)
                         ]
                     ]
                 ]);
+
+                if ($wasUnpaid && in_array($booking->payment_status, ['partial', 'paid'])) {
+                    $this->sendBookingPaymentSuccessNotifications($booking);
+                }
             }
         }
         DB::commit();
@@ -1152,6 +1159,45 @@ public function processSuccessfulPayment(Payment $payment)
         throw $e;
     }
 }
+
+    private function sendBookingPaymentSuccessNotifications(Booking $booking): void
+    {
+        if ($booking->therapist && $booking->therapist->phone) {
+            try {
+                $this->whatsappService->sendStaffBookingNotification($booking->therapist->phone, $booking);
+            } catch (\Exception $e) {
+                Log::error("Failed to notify staff WA after payment success: " . $e->getMessage());
+            }
+        }
+
+        if ($booking->therapist && $booking->therapist->email) {
+            try {
+                $this->emailService->sendStaffBookingNotification($booking->therapist->email, $booking);
+            } catch (\Exception $e) {
+                Log::error("Failed to notify staff email after payment success: " . $e->getMessage());
+            }
+        }
+
+        $customerPhone = $booking->user?->phone ?? $booking->guest_phone;
+        if ($customerPhone) {
+            try {
+                $this->whatsappService->sendBookingSuccess($customerPhone, [
+                    'customer_name'  => $booking->user?->name ?? $booking->guest_name ?? 'Pelanggan',
+                    'email'          => $booking->user?->email ?? null,
+                    'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
+                    'branch_id'      => $booking->branch_id,
+                    'booking_ref'    => $booking->booking_ref ?? '-',
+                    'therapist_name' => $booking->therapist->name ?? '-',
+                    'date'           => Carbon::parse($booking->booking_date)->format('d F Y'),
+                    'time'           => substr($booking->start_time, 0, 5) . ' WIB',
+                    'service'        => $booking->service->name ?? 'Treatment',
+                    'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
+                ]);
+            } catch (\Exception $e) {
+                Log::error("Failed to notify customer WA after payment success: " . $e->getMessage());
+            }
+        }
+    }
 
     private function handleDokuNotification(Request $request)
     {

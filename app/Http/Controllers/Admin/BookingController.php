@@ -554,8 +554,10 @@ class BookingController extends Controller
 
         AuditLog::log('create', 'Reservasi', "Created new booking REF: {$booking->booking_ref} for customer: " . ($booking->user->name ?? 'Guest'));
 
-        // Notify Staff of New Booking
-        if ($booking->therapist) {
+        // Notify Staff only after payment is received.
+        // Unpaid bookings may still be cancelled/expired, so the payment
+        // success flow will send this notification when DP/full payment lands.
+        if ($booking->therapist && in_array($booking->payment_status, ['partial', 'paid'])) {
             if ($booking->therapist->phone) {
                 $this->whatsappService->sendStaffBookingNotification($booking->therapist->phone, $booking);
             }
