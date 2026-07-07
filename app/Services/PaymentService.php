@@ -35,7 +35,8 @@ class PaymentService
         $this->whatsappService = $whatsappService;
         $this->emailService = $emailService;
         // Check if using mock mode (Midtrans/Doku not configured yet)
-        $this->isMockMode = empty(env('MIDTRANS_SERVER_KEY')) && empty(env('DOKU_CLIENT_ID'));
+        $hasDokuCredentials = !empty(env('DOKU_CLIENT_ID')) || !empty(env('DOKU_SANDBOX_CLIENT_ID'));
+        $this->isMockMode = empty(env('MIDTRANS_SERVER_KEY')) && !$hasDokuCredentials;
 
         if (!$this->isMockMode) {
             // Initialize Midtrans configuration
@@ -47,18 +48,120 @@ class PaymentService
                 \Midtrans\Config::$is3ds = true;
             }
 
-            // Initialize Doku configuration
-            if (env('DOKU_CLIENT_ID')) {
-                $this->dokuConfig = [
-                    'client_id' => env('DOKU_CLIENT_ID'),
-                    'secret_key' => env('DOKU_SECRET_KEY'),
-                    'is_production' => env('DOKU_ENV') === 'production',
-                    'base_url' => env('DOKU_ENV') === 'production'
-                        ? 'https://api.doku.com'
-                        : 'https://api-sandbox.doku.com',
-                ];
+            $this->dokuConfig = $this->resolveDokuConfig($this->currentRequest());
+        }
+    }
+
+    private function currentRequest(): ?Request
+    {
+        try {
+            return app(Request::class);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function makeDokuConfig(string $env, ?string $clientId, ?string $secretKey): ?array
+    {
+        if (empty($clientId) || empty($secretKey)) {
+            return null;
+        }
+
+        $env = strtolower($env) === 'production' ? 'production' : 'sandbox';
+
+        return [
+            'env' => $env,
+            'client_id' => $clientId,
+            'secret_key' => $secretKey,
+            'is_production' => $env === 'production',
+            'base_url' => $env === 'production'
+                ? 'https://api.doku.com'
+                : 'https://api-sandbox.doku.com',
+        ];
+    }
+
+    private function resolveDokuConfig(?Request $request = null, ?Payment $payment = null): ?array
+    {
+        $defaultConfig = $this->makeDokuConfig(
+            env('DOKU_ENV', 'production'),
+            env('DOKU_CLIENT_ID'),
+            env('DOKU_SECRET_KEY')
+        );
+
+        $sandboxConfig = $this->makeDokuConfig(
+            'sandbox',
+            env('DOKU_SANDBOX_CLIENT_ID'),
+            env('DOKU_SANDBOX_SECRET_KEY')
+        );
+
+        $clientId = $request ? $request->header('Client-Id') : null;
+        if ($clientId && $sandboxConfig && hash_equals($sandboxConfig['client_id'], $clientId)) {
+            return $sandboxConfig;
+        }
+        if ($clientId && $defaultConfig && hash_equals($defaultConfig['client_id'], $clientId)) {
+            return $defaultConfig;
+        }
+
+        $paymentData = $payment ? $payment->payment_data : null;
+        if (is_string($paymentData)) {
+            $paymentData = json_decode($paymentData, true) ?: [];
+        }
+
+        if (($paymentData['doku_env'] ?? null) === 'sandbox' && $sandboxConfig) {
+            return $sandboxConfig;
+        }
+
+        $requestedEnv = $request ? strtolower((string) $request->header('X-DOKU-ENV', '')) : '';
+        if ($requestedEnv === 'sandbox' && $sandboxConfig && $this->isDokuSandboxSwitchAllowed($request)) {
+            return $sandboxConfig;
+        }
+
+        return $defaultConfig;
+    }
+
+    private function isDokuSandboxSwitchAllowed(?Request $request): bool
+    {
+        $enabled = filter_var(env('DOKU_ENABLE_SANDBOX_SWITCH', false), FILTER_VALIDATE_BOOLEAN);
+        if (!$enabled || !$request) {
+            return false;
+        }
+
+        $allowedOrigins = array_filter(array_map('trim', explode(',', (string) env('DOKU_SANDBOX_ORIGINS', ''))));
+        if (empty($allowedOrigins)) {
+            return true;
+        }
+
+        $origin = $request->header('Origin') ?: $request->header('Referer');
+        if (!$origin) {
+            return false;
+        }
+
+        $originHost = parse_url($origin, PHP_URL_HOST);
+        foreach ($allowedOrigins as $allowedOrigin) {
+            if ($origin === $allowedOrigin || $originHost === parse_url($allowedOrigin, PHP_URL_HOST)) {
+                return true;
             }
         }
+
+        return false;
+    }
+
+    private function resolveFrontendUrl(): string
+    {
+        if (($this->dokuConfig['env'] ?? null) === 'sandbox' && env('FRONTEND_SANDBOX_URL')) {
+            return rtrim(env('FRONTEND_SANDBOX_URL'), '/');
+        }
+
+        $frontendUrl = env('FRONTEND_URL');
+        if (!$frontendUrl) {
+            if (str_contains((string) env('APP_URL'), 'localhost')) {
+                $frontendUrl = 'http://localhost:3090';
+            } else {
+                $frontendUrl = 'https://naqupos-booking.zafaranspasolo.com';
+            }
+        }
+
+        return rtrim($frontendUrl, '/');
     }
 
     /**
@@ -265,6 +368,11 @@ class PaymentService
      */
     private function createDokuPayment(Payment $payment, $model, $amount, $method)
     {
+        $this->dokuConfig = $this->resolveDokuConfig($this->currentRequest(), $payment);
+        if (!$this->dokuConfig) {
+            throw new \Exception('DOKU configuration is missing');
+        }
+
         Log::info('createDokuPayment: Start', ['model' => get_class($model), 'id' => $model->id]);
         try {
             $user = null;
@@ -411,14 +519,7 @@ class PaymentService
                 $customerEmail = 'customer@naqupos.com';
             }
 
-            $frontendUrl = env('FRONTEND_URL');
-            if (!$frontendUrl) {
-                if (str_contains(env('APP_URL'), 'localhost')) {
-                    $frontendUrl = 'http://localhost:3090';
-                } else {
-                    $frontendUrl = 'https://naqupos-booking.zafaranspasolo.com';
-                }
-            }
+            $frontendUrl = $this->resolveFrontendUrl();
             $callbackUrl = $frontendUrl . '/payment/success/' . $payment->payment_ref; // Use path instead of query param to avoid '?'
 
             if ($isDirect) {
@@ -636,6 +737,7 @@ class PaymentService
             $paymentData = [
                 'transaction_id' => $invoiceNumber,
                 'transaction_status' => 'pending',
+                'doku_env' => $this->dokuConfig['env'],
                 'payment_url' => $paymentUrl,
                 'va_number' => $vaNumber,
                 'qr_code_url' => $qrCodeUrl,
@@ -1126,13 +1228,15 @@ public function processSuccessfulPayment(Payment $payment)
 
     private function verifyDokuNotificationSignature(Request $request)
     {
+        $this->dokuConfig = $this->resolveDokuConfig($request);
+
         $clientId = $request->header('Client-Id');
         $requestId = $request->header('Request-Id');
         $timestamp = $request->header('Request-Timestamp');
         $signature = $request->header('Signature');
         $body = $request->getContent(); // Raw body
 
-        if (!$clientId || !$requestId || !$timestamp || !$signature) {
+        if (!$clientId || !$requestId || !$timestamp || !$signature || !$this->dokuConfig) {
             return false;
         }
 
@@ -1201,10 +1305,13 @@ public function processSuccessfulPayment(Payment $payment)
      */
     public function checkDokuStatus($payment)
     {
+        $this->dokuConfig = $this->resolveDokuConfig(null, $payment);
+
         Log::info('checkDokuStatus called', [
             'payment_id' => $payment->id,
             'payment_ref' => $payment->payment_ref,
             'isMockMode' => $this->isMockMode,
+            'doku_env' => $this->dokuConfig['env'] ?? null,
             'hasDokuConfig' => !empty($this->dokuConfig)
         ]);
 
