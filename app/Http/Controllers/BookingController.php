@@ -710,6 +710,14 @@ $bEnd = Carbon::parse($item->end_time);
             $totalDuration += $duration;
         }
 
+        $roomCapacityErrors = $this->validateRoomCapacityForItems($processedItems, (int) $request->branch_id);
+        if (!empty($roomCapacityErrors)) {
+            return response()->json([
+                'errors' => ['room_id' => $roomCapacityErrors],
+                'message' => $roomCapacityErrors[0],
+            ], 409);
+        }
+
         $originalTotalPrice = $totalServicePrice + $totalRoomCharge + $productTotal;
         $discountAmount = 0;
         $promo = null;
@@ -1507,6 +1515,85 @@ return response()->json($booking);
                 'guest_count' => $guestCount
             ]);
         }
+    }
+
+    private function validateRoomCapacityForItems(array $items, int $branchId, ?int $excludeBookingId = null): array
+    {
+        $errors = [];
+
+        foreach ($items as $index => $item) {
+            if (empty($item['room_id']) || empty($item['booking_date']) || empty($item['start_time']) || empty($item['end_time'])) {
+                continue;
+            }
+
+            $room = Room::find($item['room_id']);
+            if (!$room) {
+                continue;
+            }
+
+            $capacity = max(1, (int) ($room->capacity ?? 1)) * max(1, (int) ($room->quantity ?? 1));
+            $start = $item['start_time'];
+            $end = $item['end_time'];
+
+            $existingBookings = Booking::where('branch_id', $branchId)
+                ->where('booking_date', $item['booking_date'])
+                ->when($excludeBookingId, function ($q) use ($excludeBookingId) {
+                    $q->where('id', '!=', $excludeBookingId);
+                })
+                ->where(function ($q) {
+                    $q->where('is_blocked', true)
+                        ->orWhereIn('status', ['confirmed', 'in_progress', 'completed'])
+                        ->orWhere(function ($q2) {
+                            $q2->whereIn('status', ['pending_payment', 'awaiting_payment'])
+                                ->where(function ($q3) {
+                                    $q3->whereNull('expires_at')
+                                        ->orWhere('expires_at', '>', Carbon::now());
+                                });
+                        });
+                })
+                ->with(['items' => function ($q) {
+                    $q->whereNotIn('status', ['cancelled']);
+                }])
+                ->get();
+
+            $used = 0;
+            foreach ($existingBookings as $booking) {
+                $bookingItems = $booking->items && $booking->items->count() > 0
+                    ? $booking->items
+                    : collect([$booking]);
+
+                foreach ($bookingItems as $bookingItem) {
+                    if ((int) $bookingItem->room_id !== (int) $item['room_id']) {
+                        continue;
+                    }
+
+                    if ($start < $bookingItem->end_time && $end > $bookingItem->start_time) {
+                        $used++;
+                    }
+                }
+            }
+
+            $requested = 0;
+            foreach ($items as $requestIndex => $requestItem) {
+                if ($requestIndex > $index) {
+                    continue;
+                }
+
+                if ((int) ($requestItem['room_id'] ?? 0) !== (int) $item['room_id']) {
+                    continue;
+                }
+
+                if (($requestItem['start_time'] ?? null) < $end && ($requestItem['end_time'] ?? null) > $start) {
+                    $requested++;
+                }
+            }
+
+            if (($used + $requested) > $capacity) {
+                $errors[] = "Room {$room->name} sudah penuh untuk jam " . substr($start, 0, 5) . "–" . substr($end, 0, 5) . ". Kapasitas room: {$capacity} tamu.";
+            }
+        }
+
+        return array_values(array_unique($errors));
     }
 
     public function destroy($id)

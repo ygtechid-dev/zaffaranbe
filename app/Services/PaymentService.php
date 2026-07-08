@@ -177,7 +177,7 @@ class PaymentService
     {
         $modelId = $model->id;
         $isLog = $model instanceof PaymentLog;
-        $paymentRef = 'PAY-' . date('Ymd') . '-' . str_pad($modelId, 6, '0', STR_PAD_LEFT) . '-' . time();
+        $paymentRef = 'PAY-' . date('Ymd') . '-' . str_pad($modelId, 6, '0', STR_PAD_LEFT) . '-' . time() . '-' . Str::upper(Str::random(6));
 
         // Map specific payment methods to database enum values
         $methodUpper = strtoupper($method);
@@ -738,6 +738,8 @@ class PaymentService
                 'transaction_id' => $invoiceNumber,
                 'transaction_status' => 'pending',
                 'doku_env' => $this->dokuConfig['env'],
+                'requested_payment_method' => $methodUpper,
+                'selected_channels' => array_values($selectedChannels),
                 'payment_url' => $paymentUrl,
                 'va_number' => $vaNumber,
                 'qr_code_url' => $qrCodeUrl,
@@ -756,7 +758,7 @@ class PaymentService
                 'success' => true,
                 'payment_id' => $payment->id,
                 'payment_ref' => $payment->payment_ref,
-                'method' => 'doku_checkout',
+                'method' => $methodUpper,
                 'amount' => $finalAmount, // Return actual amount charged
                 'data' => $paymentData,
             ];

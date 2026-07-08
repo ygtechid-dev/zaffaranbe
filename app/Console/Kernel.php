@@ -35,7 +35,6 @@ class Kernel extends ConsoleKernel
         $schedule->command('payment:reconcile-successful')->everyMinute()->withoutOverlapping();
         $schedule->command('reminders:send --type=h1')->dailyAt('21:00');
         $schedule->command('reminders:send --type=2h')->hourly();
-        $schedule->command('reviews:request')->dailyAt('20:00')->withoutOverlapping();
         $schedule->command('automations:process')->dailyAt('08:00');
     }
 }
