@@ -176,14 +176,20 @@ class WhatsAppService
         ?string $email = null
     ): bool {
         try {
-            $response = Http::timeout(10)->post($this->wrapperUrl . '/smart-send', [
+            $payload = [
                 'event'        => $eventKey,
                 'phone_number' => $this->formatPhone($phone),
                 'phone_name'   => $name,
                 'inbox_id'     => $inboxId ?? $this->defaultInboxId,
                 'variables'    => $vars,
                 'email'        => $email ?? null,
-            ]);
+            ];
+
+            if ($eventKey === 'auth_forgot_password_otp') {
+                $payload['template_name'] = 'otpzafaran';
+            }
+
+            $response = Http::timeout(10)->post($this->wrapperUrl . '/smart-send', $payload);
 
             $body = $response->json();
 
@@ -238,18 +244,36 @@ class WhatsAppService
     {
         if (empty($phone)) return false;
 
-        // Pakai smart-send dengan template otpzafaran
+        $this->loadConfig();
+        try {
+            $response = Http::withToken($this->token)
+                ->post($this->baseUrl . '/api/messages/otp', [
+                    'phone'        => $this->formatPhone($phone),
+                    'template_name' => 'otpzafaran',
+                    'otp_code'     => (string) $otp,
+                    'button_param' => (string) $otp
+                ]);
+
+            Log::info("WhatsApp OTP Direct Response: " . $response->body());
+            if ($response->successful()) {
+                return true;
+            }
+        } catch (\Exception $e) {
+            Log::error("WhatsApp OTP Direct Failed: " . $e->getMessage());
+        }
+
+        // Fallback ke smart-send kalau endpoint OTP langsung gagal.
         $sent = $this->sendMappedTemplate('auth_forgot_password_otp', $phone, 'Pelanggan', [
             'otp_code' => (string) $otp,
         ]);
 
         // Fallback ke endpoint lama kalau smart-send gagal / belum dikonfigurasi
         if (!$sent) {
-            $this->loadConfig();
             try {
                 $response = Http::withToken($this->token)
                     ->post($this->baseUrl . '/api/messages/otp', [
                         'phone'        => $this->formatPhone($phone),
+                        'template_name' => 'otpzafaran',
                         'otp_code'     => (string) $otp,
                         'button_param' => (string) $otp
                     ]);
