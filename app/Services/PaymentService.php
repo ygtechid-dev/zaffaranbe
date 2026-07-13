@@ -146,23 +146,31 @@ class PaymentService
         return false;
     }
 
-    private function resolveFrontendUrl(): string
-    {
-        if (($this->dokuConfig['env'] ?? null) === 'sandbox' && env('FRONTEND_SANDBOX_URL')) {
+   private function resolveFrontendUrl(): string
+{
+    $isSandbox = ($this->dokuConfig['env'] ?? null) === 'sandbox';
+
+    if ($isSandbox) {
+        // Kalau ada override lewat env, tetap prioritaskan itu
+        if (env('FRONTEND_SANDBOX_URL')) {
             return rtrim(env('FRONTEND_SANDBOX_URL'), '/');
         }
 
-        $frontendUrl = env('FRONTEND_URL');
-        if (!$frontendUrl) {
-            if (str_contains((string) env('APP_URL'), 'localhost')) {
-                $frontendUrl = 'http://localhost:3090';
-            } else {
-                $frontendUrl = 'https://naqupos-booking.zafaranspasolo.com';
-            }
-        }
-
-        return rtrim($frontendUrl, '/');
+        // Default sandbox: pakai Vercel
+        return 'https://zafaranbookingapp.vercel.app';
     }
+
+    $frontendUrl = env('FRONTEND_URL');
+    if (!$frontendUrl) {
+        if (str_contains((string) env('APP_URL'), 'localhost')) {
+            $frontendUrl = 'http://localhost:3090';
+        } else {
+            $frontendUrl = 'https://naqupos-booking.zafaranspasolo.com';
+        }
+    }
+
+    return rtrim($frontendUrl, '/');
+}
 
     /**
      * Create payment link for a booking or payment log
