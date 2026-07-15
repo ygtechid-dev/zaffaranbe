@@ -66,6 +66,9 @@ class CompanySettingsController extends Controller
             'payment_timeout' => 'nullable|integer|min:1',
             'min_dp' => 'nullable|numeric|min:0',
             'min_dp_type' => 'nullable|string|in:global,per_guest',
+            'enable_full_payment' => 'nullable|boolean',
+            'enable_dp' => 'nullable|boolean',
+            'enable_cod' => 'nullable|boolean',
             'tax_percentage' => 'nullable|numeric|min:0',
             'service_charge_percentage' => 'nullable|numeric|min:0',
             'default_open_time' => 'nullable|string',
@@ -88,6 +91,26 @@ class CompanySettingsController extends Controller
 'tnc_title'   => 'nullable|string|max:255',
 'tnc_content' => 'nullable|string',
         ]);
+
+        // At least one payment option must stay enabled, otherwise customers
+        // would have no way to pay when booking online.
+        if ($request->has('enable_full_payment') || $request->has('enable_dp') || $request->has('enable_cod')) {
+            $existingBranchId = $request->input('branch_id');
+            $existing = $existingBranchId
+                ? CompanySettings::where('branch_id', $existingBranchId)->first()
+                : CompanySettings::whereNull('branch_id')->first();
+
+            $enableFull = $request->boolean('enable_full_payment', $existing->enable_full_payment ?? true);
+            $enableDp = $request->boolean('enable_dp', $existing->enable_dp ?? true);
+            $enableCod = $request->boolean('enable_cod', $existing->enable_cod ?? false);
+
+            if (!$enableFull && !$enableDp && !$enableCod) {
+                return response()->json([
+                    'message' => 'Minimal satu opsi pembayaran (Full Payment, DP, atau COD) harus aktif.',
+                    'errors' => ['enable_full_payment' => ['Minimal satu opsi pembayaran harus aktif.']],
+                ], 422);
+            }
+        }
 
         $branchId = $request->input('branch_id');
 

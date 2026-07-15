@@ -102,23 +102,38 @@ class PaymentController extends Controller
 
         $totalAmount = $request->has('amount') ? (float) $request->amount : null;
 
+        // Respect the per-branch payment option toggles (default: full + DP on, COD off)
+        $enableFullPayment = $settings ? ($settings->enable_full_payment ?? true) : true;
+        $enableDp = $settings ? ($settings->enable_dp ?? true) : true;
+        $enableCod = $settings ? ($settings->enable_cod ?? false) : false;
+
         $paymentTypes = [];
 
-        // Always include Full Payment
-        $paymentTypes[] = [
-            'id' => 'full_payment',
-            'name' => 'Pembayaran Penuh',
-            'description' => 'Bayar lunas seluruh total biaya sekarang.',
-            'amount' => $totalAmount ?: 0
-        ];
+        if ($enableFullPayment) {
+            $paymentTypes[] = [
+                'id' => 'full_payment',
+                'name' => 'Pembayaran Penuh',
+                'description' => 'Bayar lunas seluruh total biaya sekarang.',
+                'amount' => $totalAmount ?: 0
+            ];
+        }
 
         // Include DP only if total amount is not less than DP amount (or if amount not provided)
-        if ($totalAmount === null || $totalAmount >= $dpAmount) {
+        if ($enableDp && ($totalAmount === null || $totalAmount >= $dpAmount)) {
             $paymentTypes[] = [
                 'id' => 'down_payment',
                 'name' => 'Down Payment (DP)',
                 'description' => 'Bayar sebagian untuk konfirmasi reservasi.',
                 'amount' => $dpAmount
+            ];
+        }
+
+        if ($enableCod) {
+            $paymentTypes[] = [
+                'id' => 'cod',
+                'name' => 'Bayar di Tempat (COD)',
+                'description' => 'Booking langsung dikonfirmasi, bayar tunai saat kedatangan.',
+                'amount' => $totalAmount ?: 0
             ];
         }
 
@@ -139,6 +154,9 @@ class PaymentController extends Controller
             'payment_methods' => $methods,
             'tax_percentage' => $taxPercentage,
             'service_charge_percentage' => $serviceChargePercentage,
+            'enable_full_payment' => $enableFullPayment,
+            'enable_dp' => $enableDp,
+            'enable_cod' => $enableCod,
         ]);
     }
 
@@ -155,6 +173,12 @@ class PaymentController extends Controller
             'payment_method' => 'required',
             'payment_type' => 'required',
         ]);
+
+        // COD bookings are confirmed directly (no online payment); they should
+        // never reach the gateway-backed initiate flow.
+        if ($request->payment_type === 'cod') {
+            return response()->json(['error' => 'COD tidak memerlukan pembayaran online.'], 422);
+        }
 
         $booking = null;
         $paymentLog = null;

@@ -38,6 +38,9 @@ class CompanySettings extends Model
         'payment_timeout',
         'min_dp',
         'min_dp_type',
+        'enable_full_payment',
+        'enable_dp',
+        'enable_cod',
         'commission_before_discount',
         'commission_after_discount',
         'commission_include_tax',
@@ -76,6 +79,9 @@ class CompanySettings extends Model
         'rounding_amount' => 'integer',
         'is_tax_enabled' => 'boolean',
         'is_service_charge_enabled' => 'boolean',
+        'enable_full_payment' => 'boolean',
+        'enable_dp' => 'boolean',
+        'enable_cod' => 'boolean',
     ];
 
     public function branch()

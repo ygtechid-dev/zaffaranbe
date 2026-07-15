@@ -598,7 +598,7 @@ $bEnd = Carbon::parse($item->end_time);
 
             'booking_date' => 'required|date|after_or_equal:today',
             'notes' => 'nullable|string',
-            'payment_type' => 'nullable|in:full_payment,down_payment',
+            'payment_type' => 'nullable|in:full_payment,down_payment,cod',
             'promo_code' => 'nullable|string',
             'product_total' => 'nullable|numeric|min:0',
         ]);
@@ -748,6 +748,22 @@ $bEnd = Carbon::parse($item->end_time);
         $companySettings = \App\Models\CompanySettings::where('branch_id', $request->branch_id)->first()
             ?? \App\Models\CompanySettings::first();
 
+        // Validate requested payment type against branch's enabled payment options
+        $requestedPaymentType = $request->payment_type ?? 'full_payment';
+        $enableFullPayment = $companySettings ? ($companySettings->enable_full_payment ?? true) : true;
+        $enableDp = $companySettings ? ($companySettings->enable_dp ?? true) : true;
+        $enableCod = $companySettings ? ($companySettings->enable_cod ?? false) : false;
+
+        $paymentTypeEnabled = [
+            'full_payment' => $enableFullPayment,
+            'down_payment' => $enableDp,
+            'cod' => $enableCod,
+        ][$requestedPaymentType] ?? false;
+
+        if (!$paymentTypeEnabled) {
+            return response()->json(['error' => 'Metode pembayaran ini tidak tersedia untuk cabang ini.'], 422);
+        }
+
        $taxPercent = ($companySettings && ($companySettings->is_tax_enabled ?? false))
     ? ($companySettings->tax_percentage ?? 0) : 0;
 $serviceChargePercent = ($companySettings && ($companySettings->is_service_charge_enabled ?? false))
@@ -805,6 +821,24 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             $bookingData = array_merge($processedItems[0], $bookingData);
         }
 
+        // COD: skip the payment-gateway draft entirely. The slot is confirmed
+        // immediately and the guest pays cash on arrival; cashier collects the
+        // payment later through the existing POS/Cashier flow.
+        if ($requestedPaymentType === 'cod') {
+            try {
+                $booking = $this->createCodBooking($bookingData, $processedItems, $promo);
+            } catch (\Exception $e) {
+                \Log::error('COD booking creation failed: ' . $e->getMessage());
+                return response()->json(['error' => 'Gagal membuat booking COD', 'message' => $e->getMessage()], 500);
+            }
+
+            return response()->json([
+                'message' => 'Booking berhasil dikonfirmasi. Silakan bayar tunai di lokasi.',
+                'booking_id' => $booking->id,
+                'booking' => $booking,
+            ], 201);
+        }
+
         \Log::info('NOMINAL_DP CHECK', [
     'payment_type' => $request->payment_type,
     'nominal_dp_request' => $request->nominal_dp,
@@ -826,6 +860,177 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             'expired_at' => $paymentLog->expired_at,
             'booking' => null,
         ], 201);
+    }
+
+    /**
+     * Create a confirmed booking directly for COD (Cash on Delivery / pay on
+     * arrival) payment type, bypassing the payment gateway. Mirrors the
+     * booking-creation shape used by PaymentService::processSuccessfulPayment
+     * so downstream screens (Kasir, reports, notifications) behave the same.
+     */
+    private function createCodBooking(array $bookingData, array $processedItems, $promo)
+    {
+        DB::beginTransaction();
+        try {
+            $firstItem = !empty($processedItems) ? $processedItems[0] : null;
+
+            $allNotes = [];
+            foreach ($processedItems as $item) {
+                if (!empty($item['notes'])) {
+                    $allNotes[] = $item['notes'];
+                }
+            }
+            $consolidatedNotes = implode(' | ', array_unique($allNotes));
+
+            $booking = Booking::create([
+                'user_id'               => $bookingData['user_id'] ?? null,
+                'branch_id'             => $bookingData['branch_id'] ?? null,
+                'service_id'            => $firstItem['service_id'] ?? null,
+                'therapist_id'          => $firstItem['therapist_id'] ?? null,
+                'room_id'               => $firstItem['room_id'] ?? null,
+                'booking_date'          => $bookingData['booking_date'],
+                'start_time'            => $firstItem['start_time'] ?? null,
+                'end_time'              => $firstItem['end_time'] ?? null,
+                'duration'              => $bookingData['duration'] ?? 0,
+                'service_price'         => $bookingData['service_price'] ?? 0,
+                'room_charge'           => $bookingData['room_charge'] ?? 0,
+                'product_total'         => $bookingData['product_total'] ?? 0,
+                'total_price'           => $bookingData['total_price'] ?? 0,
+                'nominal_dp'            => 0,
+                'promo_code'            => $bookingData['promo_code'] ?? null,
+                'discount_amount'       => $bookingData['discount_amount'] ?? 0,
+                'service_charge_amount' => $bookingData['service_charge_amount'] ?? 0,
+                'tax_amount'            => $bookingData['tax_amount'] ?? 0,
+                'guest_count'           => $bookingData['guest_count'] ?? 1,
+                'status'                => 'confirmed',
+                'payment_status'        => 'unpaid',
+                'confirmed_at'          => Carbon::now(),
+                'guest_name'            => $firstItem['guest_name'] ?? null,
+                'guest_phone'           => $firstItem['guest_phone'] ?? null,
+                'guest_type'            => $firstItem['guest_type'] ?? 'dewasa',
+                'guest_age'             => $firstItem['guest_age'] ?? null,
+                'notes'                 => $consolidatedNotes,
+            ]);
+
+            if ($promo) {
+                $promo->incrementUsage();
+            }
+
+            $customerEmail = $booking->user?->email;
+
+            foreach ($processedItems as $index => $item) {
+                \App\Models\BookingItem::create([
+                    'booking_id'         => $booking->id,
+                    'service_id'         => $item['service_id'] ?? null,
+                    'service_variant_id' => $item['variant_id'] ?? null,
+                    'therapist_id'       => $item['therapist_id'] ?? null,
+                    'room_id'            => $item['room_id'] ?? null,
+                    'price'              => $item['service_price'],
+                    'room_charge'        => $item['room_charge'] ?? 0,
+                    'duration'           => $item['duration'],
+                    'start_time'         => $item['start_time'],
+                    'end_time'           => $item['end_time'],
+                    'guest_name'         => $item['guest_name'] ?? null,
+                    'guest_phone'        => $item['guest_phone'] ?? null,
+                    'guest_type'         => $item['guest_type'] ?? 'dewasa',
+                    'guest_age'          => $item['guest_age'] ?? null,
+                ]);
+
+                $therapist = Therapist::find($item['therapist_id'] ?? 0);
+
+                if ($therapist && $therapist->phone) {
+                    $mockBooking = (object) [
+                        'booking_date' => $booking->booking_date,
+                        'start_time'   => $item['start_time'],
+                        'end_time'     => $item['end_time'] ?? null,
+                        'booking_ref'  => $booking->booking_ref ?? null,
+                        'branch_id'    => $booking->branch_id ?? null,
+                        'branch'       => $booking->branch ?? null,
+                        'user'         => $booking->user ?? null,
+                        'therapist'    => $therapist,
+                        'therapist_id' => $therapist->id ?? null,
+                        'service'      => (object) ['name' => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment')],
+                        'service_id'   => $item['service_id'] ?? null,
+                        'guest_name'   => $item['guest_name'] ?? null,
+                        'items'        => null,
+                    ];
+
+                    try {
+                        $this->whatsappService->sendStaffBookingNotification($therapist->phone, $mockBooking);
+                    } catch (\Exception $e) {
+                        \Log::error("Failed to notify staff WA for COD item $index: " . $e->getMessage());
+                    }
+
+                    if ($therapist->email) {
+                        try {
+                            $this->emailService->sendStaffBookingNotification($therapist->email, $mockBooking);
+                        } catch (\Exception $e) {
+                            \Log::error("Failed to notify staff email for COD item $index: " . $e->getMessage());
+                        }
+                    }
+                }
+
+                $guestPhone = $item['guest_phone'] ?? null;
+                if ($guestPhone) {
+                    try {
+                        $this->whatsappService->sendBookingSuccess($guestPhone, [
+                            'customer_name'  => $item['guest_name'] ?? 'Tamu',
+                            'email'          => $item['guest_email'] ?? $customerEmail ?? null,
+                            'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
+                            'branch_id'      => $booking->branch_id,
+                            'booking_ref'    => $booking->booking_ref ?? '-',
+                            'therapist_name' => $therapist?->name ?? '-',
+                            'date'           => Carbon::parse($booking->booking_date)->format('d F Y'),
+                            'time'           => substr($item['start_time'], 0, 5) . ' WIB',
+                            'service'        => $item['service_name'] ?? ($booking->service?->name ?? 'Treatment'),
+                            'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
+                        ]);
+                    } catch (\Exception $e) {
+                        \Log::error("Failed to notify guest WA for COD item $index: " . $e->getMessage());
+                    }
+                }
+            }
+
+            AuditLog::log('booking', 'Booking', "COD booking created REF: {$booking->booking_ref}");
+
+            $phone = $booking->user ? $booking->user->phone : null;
+            $allGuestPhones = array_filter(array_column($processedItems, 'guest_phone'));
+
+            if ($phone && !in_array($phone, $allGuestPhones)) {
+                $firstTherapist = null;
+                foreach ($processedItems as $item) {
+                    if (!empty($item['therapist_id'])) {
+                        $firstTherapist = Therapist::find($item['therapist_id']);
+                        if ($firstTherapist) break;
+                    }
+                }
+
+                try {
+                    $this->whatsappService->sendBookingSuccess($phone, [
+                        'customer_name'  => $booking->user->name ?? 'Pelanggan',
+                        'email'          => $customerEmail,
+                        'branch_name'    => $booking->branch->name ?? 'Naqupos Spa',
+                        'branch_id'      => $booking->branch_id,
+                        'booking_ref'    => $booking->booking_ref ?? '-',
+                        'therapist_name' => $firstTherapist?->name ?? '-',
+                        'date'           => Carbon::parse($booking->booking_date)->format('d F Y'),
+                        'time'           => substr($processedItems[0]['start_time'] ?? $booking->start_time, 0, 5) . ' WIB',
+                        'service'        => ($processedItems[0]['service_name'] ?? $booking->service?->name ?? 'Treatment')
+                                           . (count($processedItems) > 1 ? ' (' . count($processedItems) . ' Guests)' : ''),
+                        'location'       => $booking->branch->address ?? ($booking->branch->name ?? ''),
+                    ]);
+                } catch (\Exception $e) {
+                    \Log::error('Failed to notify COD customer: ' . $e->getMessage());
+                }
+            }
+
+            DB::commit();
+            return $booking;
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('createCodBooking Error: ' . $e->getMessage());
+            throw $e;
+        }
     }
 
     /**
