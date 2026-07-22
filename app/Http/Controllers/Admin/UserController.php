@@ -8,9 +8,21 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use App\Models\AuditLog;
+use App\Models\Role;
 
 class UserController extends Controller
 {
+    private function roleIsGlobal(?string $roleName): bool
+    {
+        $roleName = strtolower((string) $roleName);
+        if (in_array($roleName, ['super_admin', 'super admin', 'owner'])) {
+            return true;
+        }
+
+        $role = Role::where('name', $roleName)->first();
+        return (bool) ($role?->is_global ?? false);
+    }
+
     public function index(Request $request)
     {
         $query = User::with(['therapist', 'branch'])->where('role', '!=', 'customer');
@@ -23,7 +35,7 @@ class UserController extends Controller
         } else {
             // If not super_admin/owner, restrict to own branch
             $user = auth()->user();
-            if ($user && !in_array(strtolower($user->role), ['super_admin', 'owner', 'admin']) && $user->branch_id) {
+            if ($user && !in_array(strtolower($user->role), ['super_admin', 'owner']) && $user->branch_id) {
                 $query->where(function ($q) use ($user) {
                     $q->where('branch_id', $user->branch_id)
                         ->orWhereNull('branch_id');
@@ -63,6 +75,7 @@ class UserController extends Controller
             'role' => 'required|string',
             'password' => 'required|string|min:6',
             'staff_id' => 'nullable|exists:therapists,id|unique:users,staff_id',
+            'branch_id' => 'nullable|exists:branches,id',
         ]);
 
         if ($validator->fails()) {
@@ -82,12 +95,18 @@ class UserController extends Controller
             }
         }
 
+        $branchId = $this->roleIsGlobal($request->role) ? null : $request->branch_id;
+
+        if (!$this->roleIsGlobal($request->role) && !$branchId) {
+            return response()->json(['errors' => ['branch_id' => ['Cabang wajib dipilih untuk role cabang.']]], 422);
+        }
+
         $user = User::create([
             'name' => $name,
             'email' => $email,
             'phone' => $phone,
             'role' => $request->role,
-            'branch_id' => $request->branch_id,
+            'branch_id' => $branchId,
             'staff_id' => $request->staff_id,
             'password' => Hash::make($request->password),
             'is_verified' => true,
@@ -119,17 +138,27 @@ class UserController extends Controller
             'name' => 'sometimes|required_without:staff_id|string|max:255',
             'email' => 'sometimes|required_without:staff_id|email|unique:users,email,' . $id,
             'phone' => 'sometimes|required_without:staff_id|string|unique:users,phone,' . $id,
-            'role' => 'sometimes|required|in:super_admin,admin,cashier,owner,branch_manager',
+            'role' => 'sometimes|required|string',
             'is_active' => 'sometimes|boolean',
             'password' => 'nullable|string|min:6',
             'staff_id' => 'nullable|exists:therapists,id|unique:users,staff_id,' . $id,
+            'branch_id' => 'nullable|exists:branches,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $data = $request->only(['name', 'email', 'phone', 'role', 'is_active', 'staff_id']);
+        $data = $request->only(['name', 'email', 'phone', 'role', 'is_active', 'staff_id', 'branch_id']);
+
+        $nextRole = $data['role'] ?? $user->role;
+        if ($this->roleIsGlobal($nextRole)) {
+            $data['branch_id'] = null;
+        } elseif ($request->has('branch_id') && !$request->branch_id) {
+            return response()->json(['errors' => ['branch_id' => ['Cabang wajib dipilih untuk role cabang.']]], 422);
+        } elseif (!$request->has('branch_id') && !$user->branch_id) {
+            return response()->json(['errors' => ['branch_id' => ['Cabang wajib dipilih untuk role cabang.']]], 422);
+        }
 
         if ($request->filled('password')) {
             $data['password'] = Hash::make($request->password);

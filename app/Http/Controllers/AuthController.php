@@ -186,6 +186,7 @@ class AuthController extends Controller
         }
 
         $user = Auth::guard('api')->user();
+        $user->load('branch');
 
         if (!$user->is_active) {
             return response()->json(['error' => 'Account is deactivated'], 403);

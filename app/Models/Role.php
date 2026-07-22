@@ -47,8 +47,21 @@ class Role extends Model
             ],
             [
                 'name' => 'admin',
-                'description' => 'Manage operations and staff',
-                'permissions' => ['dashboard', 'pos', 'calendar', 'bookings', 'customers', 'services', 'staff', 'reports', 'marketing']
+                'description' => 'Admin cabang: laporan keuangan, kalender reservasi, aplikasi kasir, dan tambah layanan',
+                'permissions' => ['reports', 'calendar', 'pos', 'services'],
+                'is_global' => false
+            ],
+            [
+                'name' => 'manajer',
+                'description' => 'Manajer cabang: operasional lengkap cabang, laporan, staff, pelanggan, layanan, dan kasir',
+                'permissions' => ['dashboard', 'reports', 'calendar', 'bookings', 'pos', 'services', 'staff', 'customers'],
+                'is_global' => false
+            ],
+            [
+                'name' => 'spv',
+                'description' => 'SPV cabang: kalender, reservasi, kasir, pelanggan, dan laporan operasional',
+                'permissions' => ['dashboard', 'calendar', 'bookings', 'pos', 'customers', 'reports'],
+                'is_global' => false
             ],
             [
                 'name' => 'cashier',

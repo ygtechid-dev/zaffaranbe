@@ -19,13 +19,17 @@ class MenuController extends Controller
         // Find role to get permissions
         $role = Role::where('name', $roleName)->first();
         $permissions = $role ? ($role->permissions ?? []) : [];
+        if ($roleName === 'admin') {
+            $permissions = ['reports', 'calendar', 'pos', 'services'];
+        }
 
         // ONLY super_admin and owner bypass subscription filtering.
         // Regular 'admin' (branch admin) is subject to subscription plan limits.
         $isSuperAdmin = in_array($roleName, ['super_admin', 'owner']);
 
-        // Grant full role permissions to super admins
-        $hasFullRoleAccess = in_array($roleName, ['super_admin', 'admin', 'owner']);
+        // Grant full role permissions only to super admins/owner.
+        // Regular 'admin' is an Admin Cabang and must follow role permissions.
+        $hasFullRoleAccess = in_array($roleName, ['super_admin', 'owner']);
 
         // --- Get subscription status for the current branch ---
         $subscriptionMenuPermissions = null; // null = no subscription filter (super admin/owner only)
@@ -184,17 +188,6 @@ class MenuController extends Controller
         // Filter by permissions
         $filtered = [];
         foreach ($navCategories as $category) {
-            // 1. Check role permission (super admins and 'admin' role have full role access)
-            $hasRolePermission = $hasFullRoleAccess || in_array($category['permission'], $permissions);
-            if (!$hasRolePermission) continue;
-
-            // 2. Check subscription permission
-            //    - super_admin / owner: $subscriptionMenuPermissions is null → always allowed
-            //    - admin / cashier: must match their branch subscription plan
-            $hasSubPermission = $subscriptionMenuPermissions === null
-                || in_array($category['permission'], $subscriptionMenuPermissions);
-            if (!$hasSubPermission) continue;
-
             $items = [];
             foreach ($category['items'] as $item) {
                 $hasItemRolePerm = $hasFullRoleAccess || in_array($item['permission'], $permissions);
