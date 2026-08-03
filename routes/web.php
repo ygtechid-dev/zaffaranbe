@@ -207,6 +207,8 @@ $router->get('settings/public', 'PublicSettingsController@index');
             $router->get('/', 'ProfileController@show');
             $router->put('/', 'ProfileController@update');
             $router->put('/password', 'ProfileController@changePassword');
+            // Hapus akun permanen — App Store guideline 5.1.1(v)
+            $router->delete('/', 'ProfileController@destroy');
         });
 
         // Notifications
