@@ -465,34 +465,111 @@ class ServiceController extends Controller
 
 public function getFeatured(Request $request)
 {
-    // Service tanpa variant yang is_featured
-    $services = DB::select("
-        SELECT s.*, NULL as variant_id, NULL as variant_name, 
-               s.price as variant_price, s.duration as variant_duration,
-               s.featured_order as sort_order
-        FROM services s
-        WHERE s.is_featured = 1 
-          AND s.is_active = 1
-          AND NOT EXISTS (
-              SELECT 1 FROM service_variants sv 
-              WHERE sv.service_id = s.id
-          )
-        
-        UNION ALL
-        
-        -- Variant yang is_featured
-        SELECT s.*, sv.id as variant_id, sv.name as variant_name,
-               sv.price as variant_price, sv.duration as variant_duration,
-               sv.featured_order as sort_order
-        FROM services s
-        JOIN service_variants sv ON sv.service_id = s.id
-        WHERE sv.is_featured = 1
-          AND s.is_active = 1
-        
-        ORDER BY sort_order ASC
-    ");
+    $branchId = $request->input('branch_id');
 
-    return response()->json($services);
+    $services = Service::query()
+        ->with(['branches', 'variants' => function ($q) {
+            $q->where('is_active', true)
+                ->where('is_featured', true)
+                ->orderBy('featured_order', 'asc');
+        }, 'serviceCategory'])
+        ->where('is_active', true)
+        ->where('is_booking_online_enabled', true)
+        ->when($branchId && $branchId !== 'all', function ($q) use ($branchId) {
+            $q->where(function ($sub) use ($branchId) {
+                $sub->where('is_global', true)
+                    ->orWhereHas('branches', function ($bq) use ($branchId) {
+                        $bq->where('branches.id', $branchId);
+                    });
+            });
+        })
+        ->where(function ($q) {
+            $q->where(function ($serviceOnly) {
+                $serviceOnly->where('is_featured', true)
+                    ->whereDoesntHave('variants');
+            })->orWhereHas('variants', function ($variant) {
+                $variant->where('is_active', true)
+                    ->where('is_featured', true);
+            });
+        })
+        ->get();
+
+    $featured = collect();
+
+    foreach ($services as $service) {
+        $categoryName = optional($service->serviceCategory)->name ?: $service->category;
+
+        if ($service->variants->count() > 0) {
+            foreach ($service->variants as $variant) {
+                $priceData = $this->resolveFeaturedPrice($variant, $service, $branchId);
+                $item = $service->replicate();
+                $item->id = $service->id;
+                $item->category = $categoryName;
+                $item->variant_id = $variant->id;
+                $item->variant_name = $variant->name;
+                $item->variant_price = $priceData['price'];
+                $item->variant_special_price = $priceData['special_price'];
+                $item->variant_duration = $variant->duration ?: $service->duration;
+                $item->sort_order = $variant->featured_order ?? 999;
+                $item->featured_order = $variant->featured_order ?? 999;
+                $item->setRelation('variants', collect([$variant]));
+                $item->setRelation('branches', $service->branches);
+                $item->setRelation('serviceCategory', $service->serviceCategory);
+                $featured->push($item);
+            }
+            continue;
+        }
+
+        $priceData = $this->resolveFeaturedPrice($service, null, $branchId);
+        $service->category = $categoryName;
+        $service->variant_id = null;
+        $service->variant_name = null;
+        $service->variant_price = $priceData['price'];
+        $service->variant_special_price = $priceData['special_price'];
+        $service->variant_duration = $service->duration;
+        $service->sort_order = $service->featured_order ?? 999;
+        $featured->push($service);
+    }
+
+    return response()->json($featured->sortBy('sort_order')->values());
+}
+
+private function resolveFeaturedPrice($item, $fallbackItem = null, $branchId = null): array
+{
+    $branchPrice = $this->findBranchPrice($item->branch_prices ?? null, $branchId);
+    $fallbackBranchPrice = $fallbackItem ? $this->findBranchPrice($fallbackItem->branch_prices ?? null, $branchId) : null;
+
+    return [
+        'price' => $branchPrice['price']
+            ?? $fallbackBranchPrice['price']
+            ?? $item->price
+            ?? optional($fallbackItem)->price
+            ?? 0,
+        'special_price' => $branchPrice['special_price']
+            ?? $fallbackBranchPrice['special_price']
+            ?? $item->special_price
+            ?? optional($fallbackItem)->special_price
+            ?? 0,
+    ];
+}
+
+private function findBranchPrice($branchPrices, $branchId): ?array
+{
+    if (!$branchId || $branchId === 'all' || !$branchPrices) {
+        return null;
+    }
+
+    if (is_string($branchPrices)) {
+        $branchPrices = json_decode($branchPrices, true) ?: [];
+    }
+
+    foreach ($branchPrices as $key => $value) {
+        if (is_array($value) && (string) ($value['branch_id'] ?? $key) === (string) $branchId) {
+            return $value;
+        }
+    }
+
+    return null;
 }
 
  public function updateFeatured(Request $request)

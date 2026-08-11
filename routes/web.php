@@ -126,6 +126,7 @@ $router->group(['prefix' => 'api/v1'], function () use ($router) {
     $router->get('payment-configs', 'PaymentController@getConfig');
 
     // Public service listing
+    $router->get('services/featured', 'ServiceController@getFeatured');
     $router->get('services', 'ServiceController@index');
     $router->get('services/{id}', 'ServiceController@show');
 
