@@ -66,10 +66,21 @@ class ServiceController extends Controller
 
         $perPage = $request->input('per_page', 10);
         if ($request->input('limit') === 'none' || $request->input('all') === 'true') {
-            return response()->json($query->get());
+            $services = $query->get();
+            if ($this->isPublicServiceListingRequest($request)) {
+                $services = $this->decorateServicesForPublicFeatured($services, $request->input('branch_id'));
+            }
+            return response()->json($services);
         }
 
-        return response()->json($query->paginate($perPage));
+        $paginated = $query->paginate($perPage);
+        if ($this->isPublicServiceListingRequest($request)) {
+            $paginated->setCollection(
+                $this->decorateServicesForPublicFeatured($paginated->getCollection(), $request->input('branch_id'))
+            );
+        }
+
+        return response()->json($paginated);
     }
 
     public function reorder(Request $request)
@@ -462,6 +473,45 @@ class ServiceController extends Controller
 
         return response()->json(['error' => 'No image provided'], 400);
     }
+
+private function isPublicServiceListingRequest(Request $request): bool
+{
+    return $request->is('api/v1/services');
+}
+
+private function decorateServicesForPublicFeatured($services, $branchId = null)
+{
+    return $services->map(function ($service) use ($branchId) {
+        $featuredVariant = $service->variants
+            ->filter(function ($variant) {
+                return (bool) $variant->is_featured && $variant->is_active !== false;
+            })
+            ->sortBy(function ($variant) {
+                return $variant->featured_order ?? 999;
+            })
+            ->first();
+
+        if (!$featuredVariant) {
+            return $service;
+        }
+
+        $priceData = $this->resolveFeaturedPrice($featuredVariant, $service, $branchId);
+
+        // Mobile Home lama membaca field parent service (price/duration/featured_order).
+        // Override field parent dengan varian featured supaya tidak perlu ubah FE mobile.
+        $service->price = $priceData['price'];
+        $service->special_price = $priceData['special_price'];
+        $service->duration = $featuredVariant->duration ?: $service->duration;
+        $service->featured_order = $featuredVariant->featured_order ?? $service->featured_order ?? 999;
+        $service->variant_id = $featuredVariant->id;
+        $service->variant_name = $featuredVariant->name;
+        $service->variant_price = $priceData['price'];
+        $service->variant_special_price = $priceData['special_price'];
+        $service->variant_duration = $service->duration;
+
+        return $service;
+    });
+}
 
 public function getFeatured(Request $request)
 {
