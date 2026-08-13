@@ -47,7 +47,7 @@ class CashierShiftController extends Controller
         );
 
         $cashBalance->update([
-            'current_balance' => $cashBalance->current_balance - $request->starting_cash,
+            'current_balance' => max(0, (float) $cashBalance->current_balance - (float) $request->starting_cash),
             'last_updated' => \Carbon\Carbon::now()
         ]);
 
@@ -184,11 +184,17 @@ $methodTotals = (clone $transactions)
             ];
         });
 
+        $bankDeposits = \DB::table('bank_deposits')
+            ->where('branch_id', $shift->branch_id)
+            ->whereBetween('created_at', [$shift->clock_in, \Carbon\Carbon::now()])
+            ->sum('amount');
+
         $shift->total_sales = $totalSales;
         $shift->cash_sales = $cashSales;
         $shift->non_cash_sales = $nonCashSales;
         $shift->dp_sales = $dpSales;
         $shift->full_sales = $fullSales;
+        $shift->bank_deposits = (float) $bankDeposits;
         $shift->transaction_count = $count;
         $shift->method_breakdown = $methodBreakdown;
 
@@ -225,7 +231,16 @@ $methodTotals = (clone $transactions)
             $query->whereDate('clock_in', $request->date);
         }
 
-        $shifts = $query->orderBy('created_at', 'desc')->paginate(20);
+        if ($request->filled('start_date')) {
+            $query->whereDate('clock_in', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('clock_in', '<=', $request->end_date);
+        }
+
+        $perPage = $request->get('limit', 20);
+        $shifts = $query->orderBy('created_at', 'desc')->paginate(is_numeric($perPage) ? (int) $perPage : 20);
 
         return response()->json($shifts);
     }
