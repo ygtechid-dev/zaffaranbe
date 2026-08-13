@@ -149,11 +149,11 @@ public function getTherapistAvailability(Request $request)
         })
         ->with([
             'schedules' => function ($q) use ($date, $dayOfWeek) {
-                $q->where('is_active', true)
-                    ->where(function ($q2) use ($date, $dayOfWeek) {
+                $q->where(function ($q2) use ($date, $dayOfWeek) {
                         $q2->where('date', $date)
                             ->orWhere(function ($q3) use ($date, $dayOfWeek) {
                                 $q3->whereNull('date')
+                                    ->where('is_active', true)
                                     ->where('day_of_week', $dayOfWeek)
                                     ->where(function ($q4) use ($date) {
                                         $q4->whereNull('start_date')
@@ -166,6 +166,7 @@ public function getTherapistAvailability(Request $request)
                             })
                             ->orWhere(function ($q4) use ($date) {
                                 $q4->whereNull('date')
+                                    ->where('is_active', true)
                                     ->where('day_of_week', 'daily')
                                     ->where(function ($q5) use ($date) {
                                         $q5->whereNull('start_date')
@@ -237,7 +238,7 @@ public function getTherapistAvailability(Request $request)
             return 1;
         })->first();
 
-        if (!$schedule) continue;
+        if (!$schedule || !$schedule->is_active) continue;
 
         $availableSlots = [];
         $shiftStart = Carbon::parse($date . ' ' . $schedule->start_time);
@@ -370,11 +371,11 @@ public function getTherapistAvailability(Request $request)
         ->with([
             'schedules' => function ($query) use ($dayOfWeek, $bookingDate) {
                 $dateStr = $bookingDate->toDateString();
-                $query->where('is_active', true)
-                    ->where(function ($q2) use ($dateStr, $dayOfWeek) {
+                $query->where(function ($q2) use ($dateStr, $dayOfWeek) {
                         $q2->where('date', $dateStr)
                             ->orWhere(function ($q3) use ($dateStr, $dayOfWeek) {
                                 $q3->whereNull('date')
+                                    ->where('is_active', true)
                                     ->where('day_of_week', $dayOfWeek)
                                     ->where(function ($q4) use ($dateStr) {
                                         $q4->whereNull('start_date')
@@ -387,6 +388,7 @@ public function getTherapistAvailability(Request $request)
                             })
                             ->orWhere(function ($q4) use ($dateStr) {
                                 $q4->whereNull('date')
+                                    ->where('is_active', true)
                                     ->where('day_of_week', 'daily')
                                     ->where(function ($q5) use ($dateStr) {
                                         $q5->whereNull('start_date')
@@ -443,7 +445,7 @@ public function getTherapistAvailability(Request $request)
         ]);
     }
     
-        if (!$schedule) return false;
+        if (!$schedule || !$schedule->is_active) return false;
 
         $shiftStart = Carbon::parse($schedule->start_time);
         $shiftEnd = Carbon::parse($schedule->end_time);

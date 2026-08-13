@@ -300,9 +300,44 @@ class TherapistController extends Controller
         ]);
     }
 
-    public function deleteSchedule($scheduleId)
+    public function deleteSchedule(Request $request, $scheduleId)
     {
         $schedule = TherapistSchedule::findOrFail($scheduleId);
+        $date = $request->query('date');
+
+        // If a recurring schedule is deleted from a calendar date, do not delete
+        // the whole recurring rule. Create/update an inactive date-specific
+        // exception so only the clicked date disappears.
+        if ($date && !$schedule->date) {
+            $validator = Validator::make(['date' => $date], [
+                'date' => 'required|date',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json(['errors' => $validator->errors()], 422);
+            }
+
+            TherapistSchedule::updateOrCreate(
+                [
+                    'therapist_id' => $schedule->therapist_id,
+                    'date' => $date,
+                    'start_time' => $schedule->start_time,
+                    'end_time' => $schedule->end_time,
+                ],
+                [
+                    'day_of_week' => null,
+                    'start_date' => null,
+                    'end_date' => null,
+                    'shift_type' => $schedule->shift_type ?? 'full_day',
+                    'is_active' => false,
+                ]
+            );
+
+            return response()->json([
+                'message' => 'Schedule date removed successfully',
+            ]);
+        }
+
         $schedule->delete();
 
         return response()->json([

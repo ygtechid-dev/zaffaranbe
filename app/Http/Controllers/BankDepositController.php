@@ -16,7 +16,7 @@ class BankDepositController extends Controller
     public function getCashBalance(Request $request)
     {
         $branchId = $request->get('branch_id');
-        
+
         if (!$branchId) {
             return response()->json(['error' => 'Branch ID required'], 400);
         }
@@ -26,47 +26,70 @@ class BankDepositController extends Controller
             ['current_balance' => 0]
         );
 
-        // Calculate Active Shift Cash (Laci)
-        $activeShiftCash = 0;
-        $activeShift = \App\Models\CashierShift::where('branch_id', $branchId)
-            ->whereNull('clock_out')
-            ->first();
-            
-        if ($activeShift) {
-            // Calculate cash sales for this shift
-             // Get cash-type payment method codes
-            $cashPaymentCodes = \DB::table('payment_methods')
-                ->where('type', 'cash')
-                ->pluck('code')
-                ->toArray();
-            
-            $cashPaymentCodes[] = 'cash';
-            $cashPaymentCodes[] = 'CASH';
-
-            $cashSales = \DB::table('transactions')
-                ->where('cashier_id', $activeShift->cashier_id)
-                ->where('branch_id', $branchId) // Ensure branch match
-                ->whereIn('payment_method', $cashPaymentCodes)
-                ->whereBetween('transaction_date', [$activeShift->clock_in, \Carbon\Carbon::now()])
-                ->sum('total');
-
-            $expenses = \DB::table('expenses')
-                ->where('cashier_shift_id', $activeShift->id)
-                ->sum('amount');
-                
-            $activeShiftCash = $activeShift->starting_cash + $cashSales - $expenses;
-        }
-
-        // Total available cash = Safe Balance + Active Drawer Balance
-        $totalBalance = $balance->current_balance + $activeShiftCash;
+        $activeCash = $this->calculateActiveShiftCash($branchId);
+        $safeBalance = max(0, (float) $balance->current_balance);
+        $drawerBalance = $activeCash['drawer_net'];
+        $totalBalance = max(0, $safeBalance + $drawerBalance);
 
         return response()->json([
             'branch_id' => $balance->branch_id,
-            'current_balance' => $totalBalance, // Return the combined dynamic balance
-            'safe_balance' => $balance->current_balance,
-            'drawer_balance' => $activeShiftCash,
+            'current_balance' => $totalBalance,
+            'safe_balance' => $safeBalance,
+            'drawer_balance' => $drawerBalance,
+            'drawer_gross' => $activeCash['drawer_gross'],
+            'active_shift_deposits' => $activeCash['deposits'],
             'last_updated' => $balance->last_updated,
         ]);
+    }
+
+    private function getCashPaymentCodes(): array
+    {
+        $codes = DB::table('payment_methods')
+            ->where('type', 'cash')
+            ->pluck('code')
+            ->toArray();
+
+        return array_values(array_unique(array_merge($codes, ['cash', 'CASH'])));
+    }
+
+    private function calculateActiveShiftCash($branchId): array
+    {
+        $activeShift = \App\Models\CashierShift::where('branch_id', $branchId)
+            ->whereNull('clock_out')
+            ->first();
+
+        if (!$activeShift) {
+            return [
+                'shift' => null,
+                'drawer_gross' => 0,
+                'deposits' => 0,
+                'drawer_net' => 0,
+            ];
+        }
+
+        $cashSales = DB::table('transactions')
+            ->where('cashier_id', $activeShift->cashier_id)
+            ->where('branch_id', $branchId)
+            ->whereIn('payment_method', $this->getCashPaymentCodes())
+            ->whereBetween('transaction_date', [$activeShift->clock_in, \Carbon\Carbon::now()])
+            ->sum('total');
+
+        $expenses = DB::table('expenses')
+            ->where('cashier_shift_id', $activeShift->id)
+            ->sum('amount');
+
+        $shiftDeposits = BankDeposit::where('branch_id', $branchId)
+            ->whereBetween('created_at', [$activeShift->clock_in, \Carbon\Carbon::now()])
+            ->sum('amount');
+
+        $drawerGross = (float) $activeShift->starting_cash + (float) $cashSales - (float) $expenses;
+
+        return [
+            'shift' => $activeShift,
+            'drawer_gross' => $drawerGross,
+            'deposits' => (float) $shiftDeposits,
+            'drawer_net' => max(0, $drawerGross - (float) $shiftDeposits),
+        ];
     }
 
     /**
@@ -133,45 +156,18 @@ class BankDepositController extends Controller
                 ['current_balance' => 0]
             );
 
-            // Calculate active shift cash for validation
-            $activeShiftCash = 0;
-            $activeShift = \App\Models\CashierShift::where('branch_id', $request->branch_id)
-                ->whereNull('clock_out')
-                ->first();
-                
-            if ($activeShift) {
-                 // Get cash-type payment method codes
-                $cashPaymentCodes = \DB::table('payment_methods')
-                    ->where('type', 'cash')
-                    ->pluck('code')
-                    ->toArray();
-                
-                $cashPaymentCodes[] = 'cash';
-                $cashPaymentCodes[] = 'CASH';
-
-                $cashSales = \DB::table('transactions')
-                    ->where('cashier_id', $activeShift->cashier_id)
-                    ->where('branch_id', $request->branch_id)
-                    ->whereIn('payment_method', $cashPaymentCodes)
-                    ->whereBetween('transaction_date', [$activeShift->clock_in, \Carbon\Carbon::now()])
-                    ->sum('total');
-
-                $expenses = \DB::table('expenses')
-                    ->where('cashier_shift_id', $activeShift->id)
-                    ->sum('amount');
-                    
-                $activeShiftCash = $activeShift->starting_cash + $cashSales - $expenses;
-            }
-
-            $totalAvailable = $cashBalance->current_balance + $activeShiftCash;
+            $activeCash = $this->calculateActiveShiftCash($request->branch_id);
+            $safeBalance = max(0, (float) $cashBalance->current_balance);
+            $drawerBalance = $activeCash['drawer_net'];
+            $totalAvailable = max(0, $safeBalance + $drawerBalance);
 
             // Validate sufficient balance
             if ($totalAvailable < $request->amount) {
                 return response()->json([
                     'error' => 'Saldo cash tidak mencukupi (Safe + Laci)',
                     'current_balance' => $totalAvailable,
-                    'safe_balance' => $cashBalance->current_balance,
-                    'drawer_balance' => $activeShiftCash,
+                    'safe_balance' => $safeBalance,
+                    'drawer_balance' => $drawerBalance,
                     'requested_amount' => $request->amount
                 ], 400);
             }
@@ -213,15 +209,20 @@ class BankDepositController extends Controller
             // Create deposit record
             $deposit = BankDeposit::create($data);
 
-            // Update cash balance (Safe)
-            // We subtract the amount from the SAFE balance. It might go negative if we took from Laci.
-            // This is the chosen "simple" implementation.
-            $newSafeBalance = $cashBalance->current_balance - $request->amount;
-            
-            $cashBalance->update([
-                'current_balance' => $newSafeBalance,
-                'last_updated' => \Carbon\Carbon::now()
-            ]);
+            // Deduct from active drawer first. Only reduce safe balance for any remainder.
+            // This prevents setoran during an active shift from making safe balance negative.
+            $safeDeduction = max(0, (float) $request->amount - max(0, $drawerBalance));
+            if ($safeDeduction > 0) {
+                $cashBalance->update([
+                    'current_balance' => max(0, $safeBalance - $safeDeduction),
+                    'last_updated' => \Carbon\Carbon::now()
+                ]);
+            } else {
+                $cashBalance->update([
+                    'current_balance' => $safeBalance,
+                    'last_updated' => \Carbon\Carbon::now()
+                ]);
+            }
 
             DB::commit();
 
@@ -319,11 +320,15 @@ class BankDepositController extends Controller
         $totalDeposits = $query->sum('amount');
         $depositCount = $query->count();
 
-        // Get current cash balance
+        // Get current cash balance (safe + active drawer, net of active shift deposits)
         $cashBalance = 0;
         if ($branchId) {
-            $balance = CashBalance::where('branch_id', $branchId)->first();
-            $cashBalance = $balance ? $balance->current_balance : 0;
+            $balance = CashBalance::firstOrCreate(
+                ['branch_id' => $branchId],
+                ['current_balance' => 0]
+            );
+            $activeCash = $this->calculateActiveShiftCash($branchId);
+            $cashBalance = max(0, max(0, (float) $balance->current_balance) + $activeCash['drawer_net']);
         }
 
         return response()->json([

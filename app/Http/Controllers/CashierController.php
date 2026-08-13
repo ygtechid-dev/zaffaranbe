@@ -99,19 +99,24 @@ class CashierController extends Controller
             ->get();
 
         foreach ($therapists as $therapist) {
-            // Check if therapist has schedule for this day
+            // Check if therapist has schedule for this day. Date-specific rows,
+            // including inactive exception rows, must win over recurring rules.
             $schedule = TherapistSchedule::where('therapist_id', $therapist->id)
-                ->where('is_active', true)
                 ->where(function ($q) use ($date, $dayOfWeekLower) {
                     $q->where('date', $date)
                         ->orWhere(function ($q2) use ($dayOfWeekLower) {
-                            $q2->where('day_of_week', $dayOfWeekLower)
+                            $q2->where('is_active', true)
+                                ->where('day_of_week', $dayOfWeekLower)
                                 ->whereNull('date');
                         });
                 })
+                ->get()
+                ->sortByDesc(function ($s) {
+                    return $s->date ? 2 : 1;
+                })
                 ->first();
 
-            if (!$schedule) {
+            if (!$schedule || !$schedule->is_active) {
                 continue;
             }
 
