@@ -553,26 +553,26 @@ $bEnd = Carbon::parse($item->end_time);
     }
 
     $availableRooms = $availableRooms
-        ->filter(function ($room) {
-            $qty = (int) ($room->quantity ?? 1);
-            if ($qty < 1) $qty = 1;
-            $totalCapacity = $room->capacity * $qty;
-            return $room->bookings_count < $totalCapacity;
-        })
         ->map(function ($room) {
             $qty = (int) ($room->quantity ?? 1);
             if ($qty < 1) $qty = 1;
             $totalCapacity = $room->capacity * $qty;
-            $room->available_slots = $totalCapacity - $room->bookings_count;
+            $remainingSlots = $totalCapacity - $room->bookings_count;
+            $room->available_slots = max(0, $remainingSlots);
+            $room->is_full = $remainingSlots <= 0;
             $room->quantity = $qty;
             return $room;
         })
         ->values();
 
+    $hasAvailableRoom = $availableRooms->contains(function ($room) {
+        return (int) ($room->available_slots ?? 0) > 0;
+    });
+
     return response()->json([
         'available_therapists' => $formattedTherapists,
         'available_rooms' => $availableRooms,
-        'slot_available' => $formattedTherapists->isNotEmpty() && $availableRooms->isNotEmpty(),
+        'slot_available' => $formattedTherapists->isNotEmpty() && $hasAvailableRoom,
     ]);
 }
 
