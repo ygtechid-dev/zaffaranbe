@@ -169,7 +169,7 @@ class ServiceController extends Controller
         }
 
         $maxPosition = Service::where('category', $request->category)->max('position');
-        $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url']), [
+        $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url', 'status']), [
             'is_global' => $isGlobal,
             'position' => $maxPosition + 1
         ]);
@@ -266,7 +266,7 @@ class ServiceController extends Controller
             'availability_data' => 'nullable|array',
             'all_branches_same_price' => 'nullable|boolean',
             'branch_prices' => 'nullable|array',
-            'branch_ids' => 'sometimes|array|min:1',
+            'branch_ids' => 'nullable|array',
             'variants' => 'nullable|array',
             'variants.*.id' => 'nullable|integer|exists:service_variants,id',
             'variants.*.duration' => 'required_with:variants|integer|min:1',
@@ -289,7 +289,7 @@ class ServiceController extends Controller
         $oldPrice = $service->price;
         $oldSpecialPrice = $service->special_price;
 
-        $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url']), ['is_global' => $isGlobal]);
+        $serviceData = array_merge($request->except(['image', 'variants', 'branch_ids', 'has_variants', 'imageFile', 'imagePreview', 'image_url', 'status']), ['is_global' => $isGlobal]);
         
         \Log::info('[ServiceUpdate] availability data received:', [
             'is_limited_availability' => $request->input('is_limited_availability'),
