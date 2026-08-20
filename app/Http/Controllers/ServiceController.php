@@ -236,6 +236,20 @@ class ServiceController extends Controller
     {
         $service = Service::findOrFail($id);
 
+        // Admin FE lama kadang mengirim code kosong saat edit status layanan.
+        // Jangan jadikan code kosong sebagai perubahan, karena code sifatnya opsional saat update.
+        if ($request->has('code') && trim((string) $request->input('code')) === '') {
+            $request->request->remove('code');
+        }
+
+        $payloadKeys = collect($request->all())->keys()->sort()->values()->all();
+        if ($payloadKeys === ['is_active']) {
+            $service->update(['is_active' => filter_var($request->input('is_active'), FILTER_VALIDATE_BOOLEAN)]);
+            AuditLog::log('update', 'Layanan', "Updated service status: {$service->name}");
+
+            return response()->json($service->fresh()->load(['branches', 'variants']));
+        }
+
         $isGlobal = $request->input('is_global', $service->is_global);
         $branchIds = $request->input('branch_ids', []);
 

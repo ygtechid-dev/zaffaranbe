@@ -938,6 +938,24 @@ class BookingController extends Controller
 
         $booking->update($data);
 
+        if ($serviceIds !== null || $request->has('service_id') || $request->has('room_id')) {
+            $booking->refresh();
+            $paidAmount = $booking->payments()
+                ->whereIn('status', ['paid', 'success', 'settlement'])
+                ->sum('amount');
+
+            $paymentStatus = 'unpaid';
+            if ($paidAmount >= (float) $booking->total_price) {
+                $paymentStatus = 'paid';
+            } elseif ($paidAmount > 0) {
+                $paymentStatus = 'partial';
+            }
+
+            if (!in_array($booking->status, ['cancelled', 'refunded'])) {
+                $booking->update(['payment_status' => $paymentStatus]);
+            }
+        }
+
         // Log Agenda Change
         $newItems = $booking->fresh()->items->toArray();
         $newTotalPrice = $booking->total_price;

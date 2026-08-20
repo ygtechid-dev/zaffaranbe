@@ -24,6 +24,7 @@ class DashboardController extends Controller
         $stats = [
             'total_revenue_today' => $this->getRevenueToday($branchId),
             'bookings_today' => $this->getBookingsToday($branchId),
+            'unpaid_bookings_today' => $this->getUnpaidBookingsToday($branchId),
             'new_customers_today' => $this->getNewCustomersToday(),
             'active_therapists' => $this->getActiveTherapists($branchId),
             'total_revenue_month' => $this->getRevenueMonth($branchId),
@@ -58,6 +59,7 @@ class DashboardController extends Controller
         return response()->json([
             'total_revenue_today' => $this->getRevenueToday($branchId),
             'bookings_today' => $this->getBookingsToday($branchId),
+            'unpaid_bookings_today' => $this->getUnpaidBookingsToday($branchId),
             'new_customers_today' => $this->getNewCustomersToday(),
             'active_therapists' => $this->getActiveTherapists($branchId),
             'total_revenue_month' => $this->getRevenueMonth($branchId),
@@ -108,8 +110,21 @@ class DashboardController extends Controller
 
     private function getBookingsToday($branchId = null)
     {
+        $query = Booking::whereDate('booking_date', Carbon::today());
+        $this->applyPaidBookingScope($query);
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->count();
+    }
+
+    private function getUnpaidBookingsToday($branchId = null)
+    {
         $query = Booking::whereDate('booking_date', Carbon::today())
-            ->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment']);
+            ->where('payment_status', 'unpaid')
+            ->whereIn('status', ['pending_payment', 'awaiting_payment', 'confirmed']);
 
         if ($branchId) {
             $query->where('branch_id', $branchId);
@@ -152,12 +167,19 @@ class DashboardController extends Controller
     {
         $query = Booking::whereYear('booking_date', Carbon::now()->year)
             ->whereMonth('booking_date', Carbon::now()->month);
+        $this->applyPaidBookingScope($query);
 
         if ($branchId) {
             $query->where('branch_id', $branchId);
         }
 
         return $query->count();
+    }
+
+    private function applyPaidBookingScope($query)
+    {
+        return $query->whereIn('payment_status', ['paid', 'partial'])
+            ->whereIn('status', ['confirmed', 'in_progress', 'completed']);
     }
 
     private function getPendingPayments($branchId = null)
@@ -307,6 +329,7 @@ class DashboardController extends Controller
             DB::raw('DATE(booking_date) as date'),
             DB::raw('COUNT(*) as count')
         );
+        $this->applyPaidBookingScope($query);
 
         if ($branchId) {
             $query->where('branch_id', $branchId);
@@ -334,6 +357,7 @@ class DashboardController extends Controller
     {
         $query = Booking::select('service_id', DB::raw('COUNT(*) as total'))
             ->with('service:id,name');
+        $this->applyPaidBookingScope($query);
 
         if ($branchId) {
             $query->where('branch_id', $branchId);
@@ -362,6 +386,7 @@ class DashboardController extends Controller
     {
         $query = Booking::select('therapist_id', DB::raw('COUNT(*) as total'))
             ->with('therapist:id,name');
+        $this->applyPaidBookingScope($query);
 
         if ($branchId) {
             $query->where('branch_id', $branchId);

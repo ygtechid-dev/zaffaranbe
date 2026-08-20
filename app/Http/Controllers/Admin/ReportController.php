@@ -314,16 +314,36 @@ $totalRefund = $refundQuery
             return $bookingDate < $dateFrom || $bookingDate > $dateTo;
         });
 
-        $otherPeriodPayments = $otherPeriodTransactions->map(function ($trx) {
-            return [
-                'id' => $trx->id,
-                'booking_id' => $trx->booking_id,
-                'tanggalFaktur' => Carbon::parse($trx->booking->booking_date)->format('d M Y'),
-                'nomorFaktur' => $trx->booking->booking_ref ?? ('BK-' . $trx->booking->id),
-                'tanggalPembayaran' => Carbon::parse($trx->transaction_date)->format('d M Y'),
-                'jumlah' => (float) $trx->total
-            ];
-        })->values()->toArray();
+        $otherPeriodPayments = $otherPeriodTransactions
+            ->map(function ($trx) {
+                $paymentDate = Carbon::parse($trx->transaction_date)->format('Y-m-d');
+                $invoiceNumber = $trx->booking->booking_ref ?? ('BK-' . $trx->booking->id);
+                $amount = (float) $trx->total;
+
+                return [
+                    'id' => $trx->id,
+                    'booking_id' => $trx->booking_id,
+                    'tanggalFaktur' => Carbon::parse($trx->booking->booking_date)->format('d M Y'),
+                    'nomorFaktur' => $invoiceNumber,
+                    'tanggalPembayaran' => Carbon::parse($trx->transaction_date)->format('d M Y'),
+                    'jumlah' => $amount,
+                    // Guard report display from duplicated transaction rows caused by double submit/retry.
+                    '_dedupe_key' => implode('|', [
+                        $trx->booking_id,
+                        $invoiceNumber,
+                        $paymentDate,
+                        number_format($amount, 2, '.', ''),
+                        strtolower((string) $trx->payment_method),
+                    ]),
+                ];
+            })
+            ->unique('_dedupe_key')
+            ->map(function ($row) {
+                unset($row['_dedupe_key']);
+                return $row;
+            })
+            ->values()
+            ->toArray();
 
         return response()->json([
             'period' => ['from' => $dateFrom, 'to' => $dateTo],
