@@ -517,7 +517,11 @@ $bEnd = Carbon::parse($item->end_time);
     })->values();
 
     $availableRooms = Room::where(function ($q) use ($request) {
-        $q->where('branch_id', $request->branch_id)->orWhere('is_global', true);
+        $q->where('branch_id', $request->branch_id)
+            ->orWhere('is_global', true)
+            ->orWhereHas('branches', function ($branchQuery) use ($request) {
+                $branchQuery->where('branches.id', $request->branch_id);
+            });
     })
         ->where('is_active', true)
         ->get();
