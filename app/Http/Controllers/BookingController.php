@@ -182,9 +182,7 @@ public function getTherapistAvailability(Request $request)
         ])
         ->get();
 
-    $totalRooms = Room::where(function ($q) use ($branchId) {
-        $q->where('branch_id', $branchId)->orWhere('is_global', true);
-    })->where('is_active', true)->get()->sum(function ($room) {
+    $totalRooms = $this->roomQueryForBranch($branchId)->where('is_active', true)->get()->sum(function ($room) {
         return $room->capacity * max(1, $room->quantity ?? 1);
     });
 
@@ -516,14 +514,10 @@ $bEnd = Carbon::parse($item->end_time);
         ];
     })->values();
 
-    $availableRooms = Room::where(function ($q) use ($request) {
-        $q->where('branch_id', $request->branch_id)
-            ->orWhere('is_global', true)
-            ->orWhereHas('branches', function ($branchQuery) use ($request) {
-                $branchQuery->where('branches.id', $request->branch_id);
-            });
-    })
+    $availableRooms = $this->roomQueryForBranch((int) $request->branch_id)
         ->where('is_active', true)
+        ->orderByRaw("CASE WHEN type = 'standard' THEN 0 ELSE 1 END")
+        ->orderBy('name')
         ->get();
 
     foreach ($availableRooms as $room) {
@@ -1805,6 +1799,17 @@ return response()->json($booking);
         }
 
         return array_values(array_unique($errors));
+    }
+
+    private function roomQueryForBranch(int $branchId)
+    {
+        return Room::where(function ($query) use ($branchId) {
+            $query->where('branch_id', $branchId)
+                ->orWhere('is_global', true)
+                ->orWhereHas('branches', function ($branchQuery) use ($branchId) {
+                    $branchQuery->where('branches.id', $branchId);
+                });
+        });
     }
 
     public function destroy($id)
