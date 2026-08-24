@@ -212,6 +212,7 @@ class PaymentService
             'payment_method' => $dbPaymentMethod, // Use mapped value
             'payment_type' => $paymentType,
             'status' => 'pending',
+            'expired_at' => Carbon::now()->addMinutes(30),
             'payment_data' => json_encode([]),
         ]);
 
@@ -1251,6 +1252,9 @@ public function processSuccessfulPayment(Payment $payment)
                 // Do not convert to paid
                 return $payment;
             }
+            if ($this->rejectExpiredGatewaySuccess($payment, 'doku_callback', $notification)) {
+                return $payment->fresh();
+            }
             $newStatus = 'success';
         } elseif ($transactionStatus === 'FAILED') {
             $newStatus = 'failed';
@@ -1280,6 +1284,56 @@ public function processSuccessfulPayment(Payment $payment)
         }
 
         return $payment;
+    }
+
+    private function rejectExpiredGatewaySuccess(Payment $payment, string $source, array $gatewayPayload = []): bool
+    {
+        $expiredAt = $payment->expired_at;
+
+        if (!$expiredAt && $payment->payment_log_id) {
+            $expiredAt = $payment->paymentLog?->expired_at;
+        }
+
+        if (!$expiredAt && $payment->booking_id) {
+            $expiredAt = $payment->booking?->expires_at;
+        }
+
+        if (!$expiredAt || Carbon::now()->lessThanOrEqualTo($expiredAt)) {
+            return false;
+        }
+
+        Log::warning('Gateway SUCCESS ignored because payment already expired locally', [
+            'payment_id' => $payment->id,
+            'payment_ref' => $payment->payment_ref,
+            'source' => $source,
+            'expired_at' => $expiredAt->toDateTimeString(),
+            'now' => Carbon::now()->toDateTimeString(),
+        ]);
+
+        $paymentData = $payment->payment_data;
+        if (is_string($paymentData)) {
+            $decodedData = json_decode($paymentData, true);
+            $paymentData = is_array($decodedData) ? $decodedData : [];
+        } elseif (!is_array($paymentData)) {
+            $paymentData = [];
+        }
+
+        $paymentData['late_success_after_expiry'] = [
+            'source' => $source,
+            'received_at' => Carbon::now()->toDateTimeString(),
+            'expired_at' => $expiredAt->toDateTimeString(),
+            'gateway_status' => 'SUCCESS',
+            'gateway_payload' => $gatewayPayload,
+        ];
+
+        $payment->update([
+            'status' => 'expired',
+            'payment_data' => json_encode($paymentData),
+        ]);
+
+        $this->handleFailedPayment($payment->fresh(), 'expired');
+
+        return true;
     }
 
     private function verifyDokuNotificationSignature(Request $request)
@@ -1421,6 +1475,9 @@ public function processSuccessfulPayment(Payment $payment)
                 $newStatus = $payment->status;
 
                 if ($status === 'SUCCESS') {
+                    if ($this->rejectExpiredGatewaySuccess($payment, 'doku_status_check', $responseData)) {
+                        return $payment->fresh();
+                    }
                     $newStatus = 'success';
                 } elseif ($status === 'FAILED') {
                     $newStatus = 'failed';
@@ -1577,7 +1634,7 @@ public function processSuccessfulPayment(Payment $payment)
             if ($payment->payment_log_id) {
                 $log = $payment->paymentLog;
                 if ($log && $log->status === 'pending') {
-                    $log->update(['status' => $status === 'expired' ? 'expire' : 'cancel']);
+                    $log->update(['status' => 'expired']);
                     Log::info("PaymentLog {$log->id} updated to {$log->status}");
                 }
             }

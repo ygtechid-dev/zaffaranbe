@@ -120,6 +120,11 @@ class ServiceController extends Controller
                 $branchIds = [$request->branch_id];
             }
         }
+        $branchIds = $this->filterExistingBranchIds($branchIds);
+        $request->merge([
+            'is_global' => $isGlobal,
+            'branch_ids' => $branchIds,
+        ]);
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|min:3|max:100',
@@ -141,6 +146,7 @@ class ServiceController extends Controller
             'all_branches_same_price' => 'nullable|boolean',
             'branch_prices' => 'nullable|array',
             'branch_ids' => 'required_if:is_global,false|array|min:1',
+            'branch_ids.*' => 'exists:branches,id',
             'variants' => 'nullable|array',
             'variants.*.duration' => 'required|integer|min:1',
             'variants.*.price' => 'required|numeric|min:0',
@@ -260,6 +266,11 @@ class ServiceController extends Controller
                 $branchIds = [$request->branch_id];
             }
         }
+        $branchIds = $this->filterExistingBranchIds($branchIds);
+        $request->merge([
+            'is_global' => $isGlobal,
+            'branch_ids' => $branchIds,
+        ]);
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|required|string|min:3|max:100',
@@ -281,6 +292,7 @@ class ServiceController extends Controller
             'all_branches_same_price' => 'nullable|boolean',
             'branch_prices' => 'nullable|array',
             'branch_ids' => 'nullable|array',
+            'branch_ids.*' => 'exists:branches,id',
             'variants' => 'nullable|array',
             'variants.*.id' => 'nullable|integer|exists:service_variants,id',
             'variants.*.duration' => 'required_with:variants|integer|min:1',
@@ -408,6 +420,30 @@ class ServiceController extends Controller
 
         AuditLog::log('delete', 'Layanan', "Deleted service: {$name}");
         return response()->json(['message' => 'Service deleted successfully']);
+    }
+
+    private function filterExistingBranchIds($branchIds): array
+    {
+        if (!is_array($branchIds)) {
+            return [];
+        }
+
+        $ids = collect($branchIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        if (empty($ids)) {
+            return [];
+        }
+
+        return DB::table('branches')
+            ->whereIn('id', $ids)
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
     }
 
     public function allPriceLogs(Request $request)
