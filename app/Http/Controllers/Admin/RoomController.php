@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Room;
 use App\Models\RoomBlock;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -20,7 +21,7 @@ class RoomController extends Controller
             'branches',
             'blocks' => function ($q) use ($branchIdFilter) {
                 $q->where('is_active', true)
-                    ->where('end_date', '>=', now()->toDateString())
+                    ->where('end_date', '>=', Carbon::now()->toDateString())
                     ->when($branchIdFilter, function ($branchQuery) use ($branchIdFilter) {
                         $branchQuery->where(function ($nested) use ($branchIdFilter) {
                             $nested->whereNull('branch_id')
@@ -200,7 +201,7 @@ class RoomController extends Controller
 
         if ($request->boolean('active_only')) {
             $query->where('is_active', true)
-                ->where('end_date', '>=', now()->toDateString());
+                ->where('end_date', '>=', Carbon::now()->toDateString());
         }
 
         return response()->json($query->get());
