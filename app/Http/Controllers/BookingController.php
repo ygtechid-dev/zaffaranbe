@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Booking;
 use App\Models\Room;
+use App\Models\RoomBlock;
 use App\Models\Service;
 use App\Models\Therapist;
 use App\Models\TherapistSchedule;
@@ -516,14 +517,36 @@ $bEnd = Carbon::parse($item->end_time);
 
     $availableRooms = $this->roomQueryForBranch((int) $request->branch_id)
         ->where('is_active', true)
+        ->with(['blocks' => function ($q) use ($request) {
+            $q->where('is_active', true)
+                ->where('start_date', '<=', $request->booking_date)
+                ->where('end_date', '>=', $request->booking_date)
+                ->where(function ($branchQuery) use ($request) {
+                    $branchQuery->whereNull('branch_id')
+                        ->orWhere('branch_id', $request->branch_id);
+                });
+        }])
         ->orderByRaw("CASE WHEN type = 'standard' THEN 0 ELSE 1 END")
         ->orderBy('name')
         ->get();
 
-    foreach ($availableRooms as $room) {
-        $overlappingCount = 0;
-        foreach ($allDayBookings as $b) {
-            $itemsToProcess = [];
+        foreach ($availableRooms as $room) {
+            $overlappingCount = 0;
+            $qty = max(1, (int) ($room->quantity ?? 1));
+            $totalCapacity = max(1, (int) ($room->capacity ?? 1)) * $qty;
+
+            foreach ($room->blocks as $block) {
+                $blockStart = Carbon::parse($block->start_time);
+                $blockEnd = Carbon::parse($block->end_time);
+
+                if ($reqStart->lt($blockEnd) && $reqEnd->gt($blockStart)) {
+                    $overlappingCount += $totalCapacity;
+                    break;
+                }
+            }
+
+            foreach ($allDayBookings as $b) {
+                $itemsToProcess = [];
             if ($b->items && $b->items->count() > 0) {
                 foreach ($b->items as $item) {
                     if ($item->room_id == $room->id) {
@@ -550,9 +573,9 @@ $bEnd = Carbon::parse($item->end_time);
         $room->bookings_count = $overlappingCount;
     }
 
-    $availableRooms = $availableRooms
-        ->map(function ($room) {
-            $qty = (int) ($room->quantity ?? 1);
+        $availableRooms = $availableRooms
+            ->map(function ($room) {
+                $qty = (int) ($room->quantity ?? 1);
             if ($qty < 1) $qty = 1;
             $totalCapacity = $room->capacity * $qty;
             $remainingSlots = $totalCapacity - $room->bookings_count;
@@ -1740,6 +1763,23 @@ return response()->json($booking);
             $start = $item['start_time'];
             $end = $item['end_time'];
 
+            $hasRoomBlock = RoomBlock::where('room_id', $item['room_id'])
+                ->where('is_active', true)
+                ->where('start_date', '<=', $item['booking_date'])
+                ->where('end_date', '>=', $item['booking_date'])
+                ->where(function ($q) use ($branchId) {
+                    $q->whereNull('branch_id')
+                        ->orWhere('branch_id', $branchId);
+                })
+                ->where('start_time', '<', $end)
+                ->where('end_time', '>', $start)
+                ->exists();
+
+            if ($hasRoomBlock) {
+                $errors[] = "Room {$room->name} sedang digunakan/diblokir untuk jam " . substr($start, 0, 5) . "–" . substr($end, 0, 5) . ".";
+                continue;
+            }
+
             $existingBookings = Booking::where('branch_id', $branchId)
                 ->where('booking_date', $item['booking_date'])
                 ->when($excludeBookingId, function ($q) use ($excludeBookingId) {
@@ -1808,6 +1848,12 @@ return response()->json($booking);
                 ->orWhere('is_global', true)
                 ->orWhereHas('branches', function ($branchQuery) use ($branchId) {
                     $branchQuery->where('branches.id', $branchId);
+                })
+                // Legacy rooms may have no branch_id and no pivot rows ("Tidak ada cabang" in admin).
+                // Treat them as available fallback rooms for online booking instead of hiding them.
+                ->orWhere(function ($orphanRoomQuery) {
+                    $orphanRoomQuery->whereNull('branch_id')
+                        ->whereDoesntHave('branches');
                 });
         });
     }

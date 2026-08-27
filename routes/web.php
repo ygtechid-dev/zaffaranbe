@@ -472,6 +472,9 @@ $router->post('/featured', 'ServiceController@updateFeatured');
         $router->group(['prefix' => 'rooms'], function () use ($router) {
             $router->get('/', 'Admin\\RoomController@index');
             $router->post('/', 'Admin\\RoomController@store');
+            $router->get('/{id}/blocks', 'Admin\\RoomController@blocks');
+            $router->post('/{id}/blocks', 'Admin\\RoomController@storeBlock');
+            $router->delete('/{id}/blocks/{blockId}', 'Admin\\RoomController@deleteBlock');
             $router->get('/{id}', 'Admin\\RoomController@show');
             $router->put('/{id}', 'Admin\\RoomController@update');
             $router->delete('/{id}', 'Admin\\RoomController@destroy');
@@ -845,4 +848,3 @@ $router->group(['middleware' => ['auth', 'role:admin,owner,super_admin'], 'prefi
     $router->put('/leads/{id}', 'LeadController@update');
     $router->delete('/leads/{id}', 'LeadController@destroy');
 });
-

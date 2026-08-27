@@ -182,6 +182,17 @@ class DashboardController extends Controller
             ->whereIn('status', ['confirmed', 'in_progress', 'completed']);
     }
 
+    private function applyVisitorBookingScope($query)
+    {
+        return $query->whereIn('status', [
+            'pending_payment',
+            'awaiting_payment',
+            'confirmed',
+            'in_progress',
+            'completed',
+        ]);
+    }
+
     private function getPendingPayments($branchId = null)
     {
         $query = Booking::where('payment_status', '!=', 'paid')
@@ -307,7 +318,7 @@ class DashboardController extends Controller
 
         switch ($period) {
             case 'week':
-                $query->where('transaction_date', '>=', Carbon::now()->subDays(7));
+                $query->where('transaction_date', '>=', Carbon::today()->subDays(6));
                 break;
             case 'month':
                 $query->whereYear('transaction_date', Carbon::now()->year)
@@ -329,7 +340,7 @@ class DashboardController extends Controller
             DB::raw('DATE(booking_date) as date'),
             DB::raw('COUNT(*) as count')
         );
-        $this->applyPaidBookingScope($query);
+        $this->applyVisitorBookingScope($query);
 
         if ($branchId) {
             $query->where('branch_id', $branchId);
@@ -337,7 +348,7 @@ class DashboardController extends Controller
 
         switch ($period) {
             case 'week':
-                $query->where('booking_date', '>=', Carbon::now()->subDays(7));
+                $query->where('booking_date', '>=', Carbon::today()->subDays(6));
                 break;
             case 'month':
                 $query->whereYear('booking_date', Carbon::now()->year)

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Booking;
+use App\Models\RoomBlock;
 use App\Models\PaymentLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -1737,6 +1738,23 @@ private function validateRoomCapacityForItems(array $items, int $branchId, ?int 
         $capacity = max(1, (int) ($room->capacity ?? 1)) * max(1, (int) ($room->quantity ?? 1));
         $start = $item['start_time'];
         $end = $item['end_time'];
+
+        $hasRoomBlock = RoomBlock::where('room_id', $item['room_id'])
+            ->where('is_active', true)
+            ->where('start_date', '<=', $item['booking_date'])
+            ->where('end_date', '>=', $item['booking_date'])
+            ->where(function ($q) use ($branchId) {
+                $q->whereNull('branch_id')
+                    ->orWhere('branch_id', $branchId);
+            })
+            ->where('start_time', '<', $end)
+            ->where('end_time', '>', $start)
+            ->exists();
+
+        if ($hasRoomBlock) {
+            $errors[] = "Room {$room->name} sedang digunakan/diblokir untuk jam " . substr($start, 0, 5) . "–" . substr($end, 0, 5) . ".";
+            continue;
+        }
 
         $existingBookings = Booking::where('branch_id', $branchId)
             ->where('booking_date', $item['booking_date'])
