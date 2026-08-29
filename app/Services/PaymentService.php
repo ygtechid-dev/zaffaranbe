@@ -1237,8 +1237,10 @@ public function processSuccessfulPayment(Payment $payment)
             return $payment->fresh();
         }
 
-        // Other final states do not need more processing.
-        if (in_array($payment->status, ['failed', 'expired'])) {
+        // Other final states do not need more processing, except a gateway
+        // SUCCESS must still be allowed to heal an invoice that was marked
+        // expired locally before the server received DOKU's final status.
+        if (in_array($payment->status, ['failed', 'expired']) && $transactionStatus !== 'SUCCESS') {
             return $payment;
         }
 
@@ -1268,7 +1270,7 @@ public function processSuccessfulPayment(Payment $payment)
         try {
             $updateData = ['status' => $newStatus];
             if ($newStatus === 'success') {
-                $updateData['paid_at'] = Carbon::now();
+                $updateData['paid_at'] = $this->getGatewayTransactionTime($notification) ?? Carbon::now();
             }
             $payment->update($updateData);
 
@@ -1286,6 +1288,34 @@ public function processSuccessfulPayment(Payment $payment)
         return $payment;
     }
 
+    private function getGatewayTransactionTime(array $gatewayPayload = []): ?Carbon
+    {
+        $dateValue = $gatewayPayload['transaction']['date']
+            ?? $gatewayPayload['qris_payment']['date']
+            ?? $gatewayPayload['emoney_payment']['date']
+            ?? null;
+
+        if (!$dateValue) {
+            return null;
+        }
+
+        try {
+            $dateValue = (string) $dateValue;
+
+            if (preg_match('/^\d{14}$/', $dateValue)) {
+                return Carbon::createFromFormat('YmdHis', $dateValue);
+            }
+
+            return Carbon::parse($dateValue);
+        } catch (\Throwable $e) {
+            Log::warning('Unable to parse gateway transaction date', [
+                'date' => $dateValue,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
     private function rejectExpiredGatewaySuccess(Payment $payment, string $source, array $gatewayPayload = []): bool
     {
         $expiredAt = $payment->expired_at;
@@ -1298,15 +1328,37 @@ public function processSuccessfulPayment(Payment $payment)
             $expiredAt = $payment->booking?->expires_at;
         }
 
-        if (!$expiredAt || Carbon::now()->lessThanOrEqualTo($expiredAt)) {
+        if (!$expiredAt) {
             return false;
         }
 
-        Log::warning('Gateway SUCCESS ignored because payment already expired locally', [
+        $gatewayPaidAt = $this->getGatewayTransactionTime($gatewayPayload);
+
+        // DOKU is authoritative for the actual paid time. If the payment was
+        // completed before/equal to the invoice expiry, accept it even when the
+        // callback/status-check arrives after the local expiry job has run.
+        if ($gatewayPaidAt && $gatewayPaidAt->lessThanOrEqualTo($expiredAt)) {
+            Log::info('Gateway SUCCESS accepted although received after local expiry', [
+                'payment_id' => $payment->id,
+                'payment_ref' => $payment->payment_ref,
+                'source' => $source,
+                'expired_at' => $expiredAt->toDateTimeString(),
+                'gateway_paid_at' => $gatewayPaidAt->toDateTimeString(),
+                'now' => Carbon::now()->toDateTimeString(),
+            ]);
+            return false;
+        }
+
+        if (!$gatewayPaidAt && Carbon::now()->lessThanOrEqualTo($expiredAt)) {
+            return false;
+        }
+
+        Log::warning('Gateway SUCCESS ignored because payment was paid after expiry', [
             'payment_id' => $payment->id,
             'payment_ref' => $payment->payment_ref,
             'source' => $source,
             'expired_at' => $expiredAt->toDateTimeString(),
+            'gateway_paid_at' => $gatewayPaidAt?->toDateTimeString(),
             'now' => Carbon::now()->toDateTimeString(),
         ]);
 
@@ -1322,6 +1374,7 @@ public function processSuccessfulPayment(Payment $payment)
             'source' => $source,
             'received_at' => Carbon::now()->toDateTimeString(),
             'expired_at' => $expiredAt->toDateTimeString(),
+            'gateway_paid_at' => $gatewayPaidAt?->toDateTimeString(),
             'gateway_status' => 'SUCCESS',
             'gateway_payload' => $gatewayPayload,
         ];
@@ -1494,7 +1547,7 @@ public function processSuccessfulPayment(Payment $payment)
 
                     $updateData = ['status' => $newStatus];
                     if ($newStatus === 'success') {
-                        $updateData['paid_at'] = Carbon::now();
+                        $updateData['paid_at'] = $this->getGatewayTransactionTime($responseData) ?? Carbon::now();
                     }
                     $payment->update($updateData);
 

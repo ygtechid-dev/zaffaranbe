@@ -37,6 +37,7 @@ class BookingController extends Controller
             'payments',
             'items',
             'items.service',
+            'items.variant',
             'items.therapist',
             'items.room',
             'transaction.items.product',
@@ -54,6 +55,8 @@ class BookingController extends Controller
 
         if ($request->has('payment_status')) {
             $query->where('payment_status', $request->payment_status);
+        } elseif (!$request->boolean('include_unpaid')) {
+            $query->whereIn('payment_status', ['paid', 'partial', 'refunded']);
         }
 
         if ($request->has('date_from')) {
@@ -75,8 +78,11 @@ class BookingController extends Controller
             });
         }
 
+        $perPage = (int) $request->input('per_page', 10);
+        $perPage = max(1, min($perPage, 100));
+
         $bookings = $query->orderBy('id', 'desc')
-            ->paginate($request->input('per_page', 15));
+            ->paginate($perPage);
 
         return response()->json($bookings);
     }
@@ -90,6 +96,7 @@ class BookingController extends Controller
             'therapist',
             'room',
             'items.service',
+            'items.variant',
             'items.therapist',
             'items.room',
             'payments',

@@ -17,15 +17,16 @@ class CalendarController extends Controller
         $date = $request->input('date', Carbon::today()->toDateString());
         $view = $request->input('view', 'day'); // day, week, month
 
-        $bookings = Booking::with(['user', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.therapist', 'items.room', 'transaction.items.product', 'transaction.items.variant'])
+        $bookings = Booking::with(['user', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.variant', 'items.therapist', 'items.room', 'transaction.items.product', 'transaction.items.variant'])
             ->when($branchId && $branchId !== 'all', function ($q) use ($branchId) {
                 return $q->where('branch_id', $branchId);
             })
        ->where(function ($q) {
     $q->where('is_blocked', true)
         ->orWhere(function ($q2) {
-            // Show all non-cancelled bookings (including unpaid)
-            $q2->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending'])
+            // Show only bookings with real payment activity (DP/lunas), not unpaid guest placeholders.
+            $q2->whereIn('payment_status', ['paid', 'partial'])
+                ->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending'])
                 ->orWhere(function ($q3) {
                     // Show cancelled bookings that have refund
                     $q3->where('status', 'cancelled')
@@ -127,7 +128,11 @@ class CalendarController extends Controller
                     'type' => $item->guest_type,
                     'age' => $item->guest_age,
                     'serviceId' => $item->service_id,
-                    'serviceName' => $item->service->name ?? '',
+                    'variantId' => $item->service_variant_id,
+                    'variantName' => $item->variant->name ?? null,
+                    'serviceName' => $item->variant
+                        ? (($item->service->name ?? 'Layanan') . ' - ' . $item->variant->name)
+                        : ($item->service->name ?? ''),
                     'servicePrice' => $item->price,
                     'serviceDuration' => $item->duration,
                     'roomId' => $item->room_id,
@@ -153,7 +158,7 @@ class CalendarController extends Controller
                         'start' => substr($firstItem->start_time, 0, 5),
                         'duration' => $firstItem->duration, // Calendar block reflects the item's duration
                         'customer' => $baseData['customer'],
-                        'service' => $items->count() > 1 ? $items->count() . ' Layanan' : ($firstItem->service->name ?? ''),
+                        'service' => $items->count() > 1 ? $items->count() . ' Layanan' : ($firstItem->variant ? (($firstItem->service->name ?? 'Layanan') . ' - ' . $firstItem->variant->name) : ($firstItem->service->name ?? '')),
                         'servicePrice' => $items->sum('price'),
                         'roomId' => $firstItem->room_id ?? $booking->room_id,
                         'roomName' => $firstItem->room ? $firstItem->room->name : ($booking->room ? $booking->room->name : 'Regular'),

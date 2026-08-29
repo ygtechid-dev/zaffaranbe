@@ -209,7 +209,8 @@ class DashboardController extends Controller
     {
         $query = Booking::with(['user', 'service', 'therapist', 'room'])
             ->whereDate('booking_date', Carbon::today())
-            ->whereIn('status', ['pending_payment', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'])
+            ->whereIn('payment_status', ['paid', 'partial'])
+            ->whereIn('status', ['confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'])
             ->orderBy('start_time', 'asc');
 
         if ($branchId) {

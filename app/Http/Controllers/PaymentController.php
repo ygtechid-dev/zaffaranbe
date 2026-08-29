@@ -328,7 +328,12 @@ class PaymentController extends Controller
             env('PAYMENT_GATEWAY') === 'doku' ||
             in_array($payment->payment_method, ['virtual_account', 'qris', 'bank_transfer']);
 
-        if ($payment->status === 'pending' && $isDokuPayment) {
+        $shouldCheckDoku = $isDokuPayment && (
+            $payment->status === 'pending' ||
+            ($payment->status === 'expired' && !$payment->booking_id && $payment->payment_log_id)
+        );
+
+        if ($shouldCheckDoku) {
             Log::info('Calling checkDokuStatus for payment', ['payment_id' => $id]);
             $payment = $this->paymentService->checkDokuStatus($payment);
             // Refresh payment from database to get latest status
