@@ -10,6 +10,16 @@ use Illuminate\Support\Facades\Hash;
 
 class CustomerController extends Controller
 {
+    private function normalizeOptionalDate($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim((string) $value);
+        return $value === '' ? null : $value;
+    }
+
     public function index(Request $request)
     {
         $query = User::where('role', 'customer');
@@ -102,6 +112,11 @@ class CustomerController extends Controller
 
     public function store(Request $request)
     {
+        $request->merge([
+            'birth_date' => $this->normalizeOptionalDate($request->input('birth_date')),
+            'dob' => $this->normalizeOptionalDate($request->input('dob')),
+        ]);
+
         $this->validate($request, [
             'name' => 'required|string|max:255',
             'email' => 'nullable|email|unique:users,email',
@@ -116,7 +131,7 @@ class CustomerController extends Controller
             'notes' => 'nullable|string',
         ]);
 
-        $birthDate = $request->birth_date ?? $request->dob;
+        $birthDate = $request->input('birth_date') ?: $request->input('dob');
 
         $customer = User::create([
             'name' => $request->name,
@@ -157,6 +172,11 @@ class CustomerController extends Controller
     {
         $customer = User::where('role', 'customer')->findOrFail($id);
 
+        $request->merge([
+            'birth_date' => $this->normalizeOptionalDate($request->input('birth_date')),
+            'dob' => $this->normalizeOptionalDate($request->input('dob')),
+        ]);
+
         $this->validate($request, [
             'name' => 'sometimes|required|string|max:255',
             'email' => 'sometimes|required|email|unique:users,email,' . $id,
@@ -187,7 +207,7 @@ class CustomerController extends Controller
             'is_active',
         ]);
 
-        if ($birthDate) {
+        if ($request->has('birth_date') || $request->has('dob')) {
             $updateData['birth_date'] = $birthDate;
         }
 
