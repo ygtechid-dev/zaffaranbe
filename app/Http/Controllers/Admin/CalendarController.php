@@ -11,6 +11,25 @@ use App\Models\PaymentLog;
 
 class CalendarController extends Controller
 {
+    private function formatServiceVariantName($serviceName, $variantName = null)
+    {
+        $serviceName = trim((string) ($serviceName ?? ''));
+        $variantName = trim((string) ($variantName ?? ''));
+
+        if ($variantName !== '') {
+            $genericNames = ['perawatan lainnya', 'perawatan lainya', 'lainnya', 'lainya'];
+            if ($serviceName === '' || in_array(strtolower($serviceName), $genericNames, true)) {
+                return $variantName;
+            }
+
+            return str_contains($serviceName, $variantName)
+                ? $serviceName
+                : "{$serviceName} - {$variantName}";
+        }
+
+        return $serviceName;
+    }
+
     public function index(Request $request)
     {
         $branchId = $request->input('branch_id');
@@ -130,9 +149,7 @@ class CalendarController extends Controller
                     'serviceId' => $item->service_id,
                     'variantId' => $item->service_variant_id,
                     'variantName' => $item->variant->name ?? null,
-                    'serviceName' => $item->variant
-                        ? (($item->service->name ?? 'Layanan') . ' - ' . $item->variant->name)
-                        : ($item->service->name ?? ''),
+                    'serviceName' => $this->formatServiceVariantName($item->service->name ?? '', $item->variant->name ?? null),
                     'servicePrice' => $item->price,
                     'serviceDuration' => $item->duration,
                     'roomId' => $item->room_id,
@@ -158,7 +175,7 @@ class CalendarController extends Controller
                         'start' => substr($firstItem->start_time, 0, 5),
                         'duration' => $firstItem->duration, // Calendar block reflects the item's duration
                         'customer' => $baseData['customer'],
-                        'service' => $items->count() > 1 ? $items->count() . ' Layanan' : ($firstItem->variant ? (($firstItem->service->name ?? 'Layanan') . ' - ' . $firstItem->variant->name) : ($firstItem->service->name ?? '')),
+                        'service' => $items->count() > 1 ? $items->count() . ' Layanan' : $this->formatServiceVariantName($firstItem->service->name ?? '', $firstItem->variant->name ?? null),
                         'servicePrice' => $items->sum('price'),
                         'roomId' => $firstItem->room_id ?? $booking->room_id,
                         'roomName' => $firstItem->room ? $firstItem->room->name : ($booking->room ? $booking->room->name : 'Regular'),
