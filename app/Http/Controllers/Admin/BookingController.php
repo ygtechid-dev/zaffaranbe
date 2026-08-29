@@ -26,6 +26,44 @@ class BookingController extends Controller
         $this->emailService = $emailService;
     }
 
+    private function getRoomChargeAmount($roomId): float
+    {
+        if (!$roomId) {
+            return 0;
+        }
+
+        $room = \App\Models\Room::find($roomId);
+        return $room ? (float) ($room->extra_charge ?? $room->price ?? 0) : 0;
+    }
+
+    private function getRoomChargeSlotKey($roomId, $startTime, $endTime): ?string
+    {
+        if (!$roomId || !$startTime || !$endTime) {
+            return null;
+        }
+
+        return implode('|', [
+            (int) $roomId,
+            substr((string) $startTime, 0, 5),
+            substr((string) $endTime, 0, 5),
+        ]);
+    }
+
+    private function getRoomChargeForSlot($roomId, $startTime, $endTime, array &$chargedRoomSlots): float
+    {
+        $slotKey = $this->getRoomChargeSlotKey($roomId, $startTime, $endTime);
+        if (!$slotKey) {
+            return 0;
+        }
+
+        if (isset($chargedRoomSlots[$slotKey])) {
+            return 0;
+        }
+
+        $chargedRoomSlots[$slotKey] = true;
+        return $this->getRoomChargeAmount($roomId);
+    }
+
     public function index(Request $request)
     {
         $query = Booking::with([
@@ -409,6 +447,7 @@ class BookingController extends Controller
         // Use these to track the overall booking range
         $overallStartTime = $request->start_time;
         $overallEndTime = $request->start_time;
+        $chargedRoomSlots = [];
 
         // First pass: Calculate items and determine overall times
         foreach ($serviceIds as $index => $sId) {
@@ -457,11 +496,7 @@ class BookingController extends Controller
                 $totalServicePrice += $itemPrice;
 
                 $rId = $roomIds[$index] ?? $request->room_id;
-                $rCharge = 0;
-                if ($rId) {
-                    $r = \App\Models\Room::find($rId);
-                    $rCharge = $r ? ($r->extra_charge ?? $r->price ?? 0) : 0;
-                }
+                $rCharge = $this->getRoomChargeForSlot($rId, $itemStartTime, $itemEndTime, $chargedRoomSlots);
 
                 $totalRoomCharge += $rCharge;
                 $serviceModels[] = [
@@ -835,6 +870,7 @@ class BookingController extends Controller
             $runningTime = $request->start_time ?? $booking->start_time;
             $overallStartTime = $runningTime;
             $overallEndTime = $runningTime;
+            $chargedRoomSlots = [];
 
             foreach ($serviceIds as $index => $sId) {
                 $s = \App\Models\Service::find($sId);
@@ -845,12 +881,6 @@ class BookingController extends Controller
 
                 if ($s) {
                     $rId = $roomIds[$index] ?? $request->room_id;
-                    $rCharge = 0;
-                    if ($rId) {
-                        $r = \App\Models\Room::find($rId);
-                        $rCharge = $r ? ($r->extra_charge ?? $r->price ?? 0) : 0;
-                    }
-                    $totalRC += $rCharge;
 
                     // Params for this item
                     $itemDuration = $variant ? $variant->duration : $s->duration;
@@ -860,6 +890,8 @@ class BookingController extends Controller
                     $itemStartTime = isset($startTimes[$index]) ? $startTimes[$index] : $runningTime;
                     // End time based on item duration
                     $itemEndTime = date('H:i', strtotime($itemStartTime) + ($itemDuration * 60));
+                    $rCharge = $this->getRoomChargeForSlot($rId, $itemStartTime, $itemEndTime, $chargedRoomSlots);
+                    $totalRC += $rCharge;
 
                     $runningTime = $itemEndTime; // for next sequential
 
