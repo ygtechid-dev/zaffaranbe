@@ -1081,7 +1081,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
         }
 
         // 2. Get Real Bookings
-        $query = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'transaction', 'feedback', 'items.service', 'items.therapist', 'items.room'])
+        $query = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'transaction', 'feedback', 'items.service', 'items.variant', 'items.therapist', 'items.room'])
             ->where('user_id', auth()->id())
             ->whereIn('payment_status', ['partial', 'paid']);
 
@@ -1163,7 +1163,7 @@ $serviceChargePercent = ($companySettings && ($companySettings->is_service_charg
             return response()->json(['error' => 'Booking not found'], 404);
         }
 
-       $booking = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.therapist', 'items.room'])
+       $booking = Booking::with(['branch', 'service', 'therapist', 'room', 'payments', 'items.service', 'items.variant', 'items.therapist', 'items.room'])
     ->where('user_id', auth()->id())
     ->whereIn('payment_status', ['partial', 'paid'])
     ->findOrFail($id);
