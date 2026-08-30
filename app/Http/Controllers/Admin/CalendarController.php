@@ -319,7 +319,7 @@ public function updateSettings(Request $request)
         'start_hour' => 'required|integer|min:0|max:23',
         'end_hour' => 'required|integer|min:0|max:23|gt:start_hour',
         'slot_duration' => 'required|integer|in:5,10,15,30,60',
-        'reschedule_interval' => 'nullable|integer|in:15,30,60', // ← tambah ini
+        'reschedule_interval' => 'nullable|integer|in:5,10,15,30,60',
         'default_view' => 'required|string|in:day,week,month',
         'agenda_color' => 'nullable|string',
         'week_start' => 'nullable|string',
