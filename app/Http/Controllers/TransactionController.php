@@ -10,6 +10,18 @@ use Illuminate\Support\Facades\Validator;
 
 class TransactionController extends Controller
 {
+   private function normalizePaymentMethodForPaymentsTable(?string $method): string
+   {
+       $method = strtolower(trim((string) $method));
+
+       return match ($method) {
+           'transfer', 'transf', 'bank', 'bank transfer' => 'bank_transfer',
+           'va', 'virtual-account', 'virtual account' => 'virtual_account',
+           'card', 'debit', 'credit_card', 'debit_card' => 'edc',
+           default => $method ?: 'cash',
+       };
+   }
+
    public function index(Request $request)
 {
     $query = Transaction::with(['booking', 'branch:id,name', 'cashier:id,name']);
@@ -329,17 +341,20 @@ class TransactionController extends Controller
                         $remainingTotal -= $amount;
                     }
 
+                    $paymentsTableMethod = $this->normalizePaymentMethodForPaymentsTable($request->payment_method);
+
                     // Create Payment
                     \App\Models\Payment::create([
                         'booking_id' => $booking->id,
                         'payment_type' => $dbPaymentType,
-                        'payment_method' => $request->payment_method,
+                        'payment_method' => $paymentsTableMethod,
                         'amount' => $amount,
                         'status' => 'success',
                         'paid_at' => \Carbon\Carbon::now(),
                         'payment_data' => [
                             'transaction_id' => $transaction->id,
                             'cashier_id' => auth()->id(),
+                            'original_payment_method' => $request->payment_method,
                             'notes' => 'Created automatically from POS Transaction (Multi-booking split)'
                         ],
                         'payment_ref' => 'PAY-' . date('Ymd') . '-' . rand(1000, 9999) . '-' . $loopCount
@@ -348,16 +363,18 @@ class TransactionController extends Controller
             } elseif ($bookingId) {
                 // Fallback for single (should be covered by above loop, but safe keeps)
                 $dbPaymentType = $paymentType === 'dp' ? 'down_payment' : 'full_payment';
+                $paymentsTableMethod = $this->normalizePaymentMethodForPaymentsTable($request->payment_method);
                 \App\Models\Payment::create([
                     'booking_id' => $bookingId,
                     'payment_type' => $dbPaymentType,
-                    'payment_method' => $request->payment_method,
+                    'payment_method' => $paymentsTableMethod,
                     'amount' => $request->total,
                     'status' => 'success',
                     'paid_at' => \Carbon\Carbon::now(),
                     'payment_data' => [
                         'transaction_id' => $transaction->id,
                         'cashier_id' => auth()->id(),
+                        'original_payment_method' => $request->payment_method,
                         'notes' => 'Created automatically from POS Transaction'
                     ],
                     'payment_ref' => 'PAY-' . date('Ymd') . '-' . rand(1000, 9999)

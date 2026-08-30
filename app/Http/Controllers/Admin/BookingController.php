@@ -69,8 +69,11 @@ class BookingController extends Controller
         return $query->where(function ($q) {
             $q->where('is_blocked', true)
                 ->orWhere(function ($q2) {
-                    $q2->whereIn('payment_status', ['paid', 'partial'])
-                        ->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending', 'pending_payment']);
+                    $q2->whereIn('status', ['confirmed', 'in_progress', 'completed']);
+                })
+                ->orWhere(function ($q3) {
+                    $q3->whereIn('payment_status', ['paid', 'partial'])
+                        ->whereIn('status', ['awaiting_payment', 'pending', 'pending_payment']);
                 });
         });
     }

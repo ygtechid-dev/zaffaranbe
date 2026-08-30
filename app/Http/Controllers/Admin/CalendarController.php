@@ -40,20 +40,20 @@ class CalendarController extends Controller
             ->when($branchId && $branchId !== 'all', function ($q) use ($branchId) {
                 return $q->where('branch_id', $branchId);
             })
-       ->where(function ($q) {
-    $q->where('is_blocked', true)
-        ->orWhere(function ($q2) {
-            // Show only bookings with real payment activity (DP/lunas), not unpaid guest placeholders.
-            $q2->whereIn('payment_status', ['paid', 'partial'])
-                ->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending'])
-                ->orWhere(function ($q3) {
-                    // Show cancelled bookings that have refund
-                    $q3->where('status', 'cancelled')
-                        ->whereNotNull('refund_amount')
-                        ->where('refund_amount', '>', 0);
-                });
-        });
-});
+            ->where(function ($q) {
+                $q->where('is_blocked', true)
+                    ->orWhereIn('status', ['confirmed', 'in_progress', 'completed'])
+                    ->orWhere(function ($q2) {
+                        $q2->whereIn('payment_status', ['paid', 'partial'])
+                            ->whereIn('status', ['awaiting_payment', 'pending', 'pending_payment']);
+                    })
+                    ->orWhere(function ($q3) {
+                        // Show cancelled bookings that have refund
+                        $q3->where('status', 'cancelled')
+                            ->whereNotNull('refund_amount')
+                            ->where('refund_amount', '>', 0);
+                    });
+            });
 
         switch ($view) {
             case 'day':
