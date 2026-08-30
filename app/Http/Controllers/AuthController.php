@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Models\PendingRegistration;
 use App\Services\WhatsAppService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -12,6 +13,7 @@ use App\Models\AuditLog;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class AuthController extends Controller
 {
@@ -57,6 +59,20 @@ class AuthController extends Controller
 
     public function register(Request $request)
     {
+        if ($request->filled('email') && $request->filled('phone')) {
+            // Bersihkan akun sementara dari alur lama agar data yang belum pernah
+            // diverifikasi tidak mengunci email atau nomor WhatsApp customer.
+            User::where('role', 'customer')
+                ->where('registration_source', 'app')
+                ->where('is_verified', false)
+                ->whereNotNull('otp')
+                ->where(function ($query) use ($request) {
+                    $query->where('email', $request->email)
+                        ->orWhere('phone', $request->phone);
+                })
+                ->delete();
+        }
+
         $validator = Validator::make($request->all(), [
             'name'        => 'required|string|max:255',
             'email'       => 'required|string|email|max:255|unique:users',
@@ -76,7 +92,13 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::create([
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+
+        PendingRegistration::where('email', $request->email)
+            ->orWhere('phone', $request->phone)
+            ->delete();
+
+        $pendingRegistration = PendingRegistration::create([
             'name'                => $request->name,
             'email'               => $request->email,
             'phone'               => $request->phone,
@@ -89,31 +111,19 @@ class AuthController extends Controller
             'village_id'          => $request->village_id,
             'branch_id'           => $request->branch_id,
             'password'            => Hash::make($request->password),
-            'role'                => 'customer',
-            'registration_source' => 'app',
-            'has_app_account'     => true,
-        ]);
-
-        $otp = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-        $user->update([
             'otp'            => Hash::make($otp),
             'otp_expires_at' => \Carbon\Carbon::now()->addMinutes(10),
         ]);
 
-        $this->whatsappService->sendOtp($user->phone, $otp);
+        $this->whatsappService->sendOtp($pendingRegistration->phone, $otp);
 
-        // Kirim OTP ke email juga
-        if ($user->email) {
-            $this->sendOtpEmail($user->email, $otp, $user->name);
+        if ($pendingRegistration->email) {
+            $this->sendOtpEmail($pendingRegistration->email, $otp, $pendingRegistration->name);
         }
 
-        $token = JWTAuth::fromUser($user);
-
         return response()->json([
-            'message' => 'User registered successfully. Please verify your phone number.',
-            'user'    => $user,
-            'token'   => $token,
-        ], 201);
+            'message' => 'Kode OTP telah dikirim. Akun akan dibuat setelah OTP diverifikasi.',
+        ], 202);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -131,35 +141,66 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::where('phone', $request->phone)->first();
+        $pendingRegistration = PendingRegistration::where('phone', $request->phone)
+            ->latest('id')
+            ->first();
 
-        if (!$user) {
-            return response()->json(['error' => 'User not found'], 404);
+        if (!$pendingRegistration) {
+            return response()->json(['error' => 'Pendaftaran tidak ditemukan. Silakan daftar ulang.'], 404);
         }
 
-        if (!$user->otp || !$user->otp_expires_at) {
+        if (!$pendingRegistration->otp || !$pendingRegistration->otp_expires_at) {
             return response()->json(['error' => 'No OTP found. Please request a new one.'], 400);
         }
 
-        if ($user->otp_expires_at < \Carbon\Carbon::now()) {
+        if ($pendingRegistration->otp_expires_at < \Carbon\Carbon::now()) {
             return response()->json(['error' => 'OTP has expired'], 400);
         }
 
-        if (!Hash::check($request->otp, $user->otp)) {
+        if (!Hash::check($request->otp, $pendingRegistration->otp)) {
             return response()->json(['error' => 'Invalid OTP'], 400);
         }
 
-        $user->update([
-            'is_verified'    => true,
-            'otp'            => null,
-            'otp_expires_at' => null,
-        ]);
+        if (User::where('email', $pendingRegistration->email)->orWhere('phone', $pendingRegistration->phone)->exists()) {
+            return response()->json(['error' => 'Email atau nomor WhatsApp sudah terdaftar.'], 422);
+        }
+
+        $user = DB::transaction(function () use ($pendingRegistration) {
+            $pending = PendingRegistration::whereKey($pendingRegistration->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $user = User::create([
+                'name'                => $pending->name,
+                'email'               => $pending->email,
+                'phone'               => $pending->phone,
+                'birth_date'          => $pending->birth_date,
+                'address'             => $pending->address,
+                'city_id'             => $pending->city_id,
+                'province_id'         => $pending->province_id,
+                'regency_id'          => $pending->regency_id,
+                'district_id'         => $pending->district_id,
+                'village_id'          => $pending->village_id,
+                'branch_id'           => $pending->branch_id,
+                'password'            => $pending->password,
+                'role'                => 'customer',
+                'registration_source' => 'app',
+                'has_app_account'     => true,
+                'is_verified'         => true,
+            ]);
+
+            $pending->delete();
+
+            return $user;
+        });
 
         $this->whatsappService->sendWelcome($user->phone, $user->name);
+        $token = JWTAuth::fromUser($user);
 
         return response()->json([
             'message' => 'Phone number verified successfully',
             'user'    => $user,
+            'token'   => $token,
         ]);
     }
 
@@ -245,23 +286,24 @@ class AuthController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $user = User::where('phone', $request->phone)->first();
+        $pendingRegistration = PendingRegistration::where('phone', $request->phone)
+            ->latest('id')
+            ->first();
 
-        if (!$user) {
-            return response()->json(['error' => 'User not found'], 404);
+        if (!$pendingRegistration) {
+            return response()->json(['error' => 'Pendaftaran tidak ditemukan. Silakan daftar ulang.'], 404);
         }
 
-        $otp = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-        $user->update([
+        $otp = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $pendingRegistration->update([
             'otp'            => Hash::make($otp),
             'otp_expires_at' => \Carbon\Carbon::now()->addMinutes(10),
         ]);
 
-        $this->whatsappService->sendOtp($user->phone, $otp);
+        $this->whatsappService->sendOtp($pendingRegistration->phone, $otp);
 
-        // Kirim OTP ke email juga
-        if ($user->email) {
-            $this->sendOtpEmail($user->email, $otp, $user->name);
+        if ($pendingRegistration->email) {
+            $this->sendOtpEmail($pendingRegistration->email, $otp, $pendingRegistration->name);
         }
 
         return response()->json(['message' => 'OTP has been resent to WhatsApp and email']);
