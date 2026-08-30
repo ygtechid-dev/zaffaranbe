@@ -135,6 +135,7 @@ class CashierShiftController extends Controller
         // Calculate Stats
         $transactions = \DB::table('transactions')
             ->where('cashier_id', auth()->id())
+            ->where('branch_id', $shift->branch_id)
             ->whereBetween('transaction_date', [$shift->clock_in, \Carbon\Carbon::now()]);
 
         // Get cash-type payment method codes
@@ -152,20 +153,11 @@ class CashierShiftController extends Controller
         $nonCashSales = $totalSales - $cashSales;
         $count = (clone $transactions)->count();
 
-   // GANTI BAGIAN INI di currentShift()
-$dpSales = \DB::table('bookings')
-    ->where('branch_id', $shift->branch_id)
-    ->whereBetween('created_at', [$shift->clock_in, \Carbon\Carbon::now()])
-    ->where('nominal_dp', '>', 0)
-    ->sum('nominal_dp');
+        $dpSales = (clone $transactions)
+            ->where('notes', 'like', '%[DP]%')
+            ->sum('total');
 
-$totalTransactionSum = \DB::table('transactions')
-    ->where('branch_id', $shift->branch_id)
-    ->where('cashier_id', auth()->id())
-    ->whereBetween('transaction_date', [$shift->clock_in, \Carbon\Carbon::now()])
-    ->sum('total');
-
-$fullSales = $totalTransactionSum - $dpSales;
+        $fullSales = $totalSales - $dpSales;
 
 // Payment Method Breakdown
 $methodTotals = (clone $transactions)

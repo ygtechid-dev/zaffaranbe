@@ -58,9 +58,17 @@ class TransactionController extends Controller
     $perPage = $request->input('per_page', $request->input('limit', 15));
     if ($perPage === 'none' || $request->input('all') === 'true') {
         $transactions = $query->orderBy('transaction_date', 'desc')->get();
+        $transactions->transform(function ($transaction) {
+            $transaction->payment_type = str_contains((string) $transaction->notes, '[DP]') ? 'dp' : 'full';
+            return $transaction;
+        });
     } else {
         $transactions = $query->orderBy('transaction_date', 'desc')
             ->paginate(is_numeric($perPage) ? (int)$perPage : 15);
+        $transactions->getCollection()->transform(function ($transaction) {
+            $transaction->payment_type = str_contains((string) $transaction->notes, '[DP]') ? 'dp' : 'full';
+            return $transaction;
+        });
     }
 
     return response()->json($transactions);
