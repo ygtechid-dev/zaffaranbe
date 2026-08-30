@@ -64,6 +64,17 @@ class BookingController extends Controller
         return $this->getRoomChargeAmount($roomId);
     }
 
+    private function onlyScheduleBlockingBookings($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('is_blocked', true)
+                ->orWhere(function ($q2) {
+                    $q2->whereIn('payment_status', ['paid', 'partial'])
+                        ->whereIn('status', ['confirmed', 'in_progress', 'awaiting_payment', 'completed', 'pending', 'pending_payment']);
+                });
+        });
+    }
+
     public function index(Request $request)
     {
         $query = Booking::with([
@@ -353,9 +364,10 @@ class BookingController extends Controller
             $itemStart = $startTimesCheck[$idx] ?? $request->start_time;
             $itemEnd = date('H:i', strtotime($itemStart) + ($itemDuration * 60));
 
-            $conflictBooking = Booking::where('therapist_id', $tId)
-                ->where('booking_date', $request->booking_date)
-                ->whereNotIn('status', ['cancelled', 'awaiting_payment'])
+            $conflictBooking = $this->onlyScheduleBlockingBookings(
+                Booking::where('therapist_id', $tId)
+                    ->where('booking_date', $request->booking_date)
+            )
                 ->where(function ($q) use ($itemStart, $itemEnd) {
                     $q->where(function ($sub) use ($itemStart, $itemEnd) {
                         $sub->where('start_time', '>=', $itemStart)
@@ -712,10 +724,11 @@ class BookingController extends Controller
                 $itemStart = $startTimesCheck[$idx] ?? $startTime;
                 $itemEnd = date('H:i', strtotime($itemStart) + ($itemDuration * 60));
 
-                $conflictBooking = Booking::where('therapist_id', $tId)
-                    ->where('booking_date', $checkDate)
-                    ->where('id', '!=', $id)
-                    ->whereNotIn('status', ['cancelled', 'awaiting_payment'])
+                $conflictBooking = $this->onlyScheduleBlockingBookings(
+                    Booking::where('therapist_id', $tId)
+                        ->where('booking_date', $checkDate)
+                        ->where('id', '!=', $id)
+                )
                     ->where(function ($q) use ($itemStart, $itemEnd) {
                         $q->where(function ($sub) use ($itemStart, $itemEnd) {
                             $sub->where('start_time', '>=', $itemStart)
@@ -745,10 +758,11 @@ class BookingController extends Controller
             }
         } else {
             // Fallback single-service legacy check
-            $singleConflict = Booking::where('therapist_id', $checkTherapist)
-                ->where('booking_date', $checkDate)
-                ->where('id', '!=', $id)
-                ->whereNotIn('status', ['cancelled', 'awaiting_payment'])
+            $singleConflict = $this->onlyScheduleBlockingBookings(
+                Booking::where('therapist_id', $checkTherapist)
+                    ->where('booking_date', $checkDate)
+                    ->where('id', '!=', $id)
+            )
                 ->where(function ($q) use ($startTime, $endTime) {
                     $q->where(function ($sub) use ($startTime, $endTime) {
                         $sub->where('start_time', '>=', $startTime)->where('start_time', '<', $endTime);
@@ -1132,10 +1146,11 @@ class BookingController extends Controller
         $startTime = $request->start_time;
         $endTime = date('H:i', strtotime($startTime) + ($duration * 60));
 
-        $conflict = Booking::where('therapist_id', $booking->therapist_id)
-            ->where('booking_date', $request->booking_date)
-            ->where('id', '!=', $id)
-            ->whereNotIn('status', ['cancelled', 'awaiting_payment'])
+        $conflict = $this->onlyScheduleBlockingBookings(
+            Booking::where('therapist_id', $booking->therapist_id)
+                ->where('booking_date', $request->booking_date)
+                ->where('id', '!=', $id)
+        )
             ->where(function ($q) use ($startTime, $endTime) {
                 $q->where(function ($sub) use ($startTime, $endTime) {
                     $sub->where('start_time', '>=', $startTime)
@@ -1327,10 +1342,11 @@ class BookingController extends Controller
 
     // Conflict check — exclude source booking itself
     if ($therapistId) {
-        $conflict = Booking::where('therapist_id', $therapistId)
-            ->where('booking_date', $newDate)
-            ->whereNotIn('status', ['cancelled', 'awaiting_payment'])
-            ->where('id', '!=', $sourceBooking->id)
+        $conflict = $this->onlyScheduleBlockingBookings(
+            Booking::where('therapist_id', $therapistId)
+                ->where('booking_date', $newDate)
+                ->where('id', '!=', $sourceBooking->id)
+        )
             ->where(function ($q) use ($newStart, $newEnd) {
                 $q->where(function ($sub) use ($newStart, $newEnd) {
                     $sub->where('start_time', '>=', $newStart)
