@@ -1811,22 +1811,13 @@ private function validateRoomCapacityForItems(array $items, int $branchId, ?int 
             continue;
         }
 
-        $existingBookings = Booking::where('branch_id', $branchId)
-            ->where('booking_date', $item['booking_date'])
-            ->when($excludeBookingId, function ($q) use ($excludeBookingId) {
-                $q->where('id', '!=', $excludeBookingId);
-            })
-            ->where(function ($q) {
-                $q->where('is_blocked', true)
-                    ->orWhereIn('status', ['confirmed', 'in_progress', 'completed'])
-                    ->orWhere(function ($q2) {
-                        $q2->whereIn('status', ['pending_payment', 'awaiting_payment'])
-                            ->where(function ($q3) {
-                                $q3->whereNull('expires_at')
-                                    ->orWhere('expires_at', '>', Carbon::now());
-                            });
-                    });
-            })
+        $existingBookings = $this->onlyScheduleBlockingBookings(
+            Booking::where('branch_id', $branchId)
+                ->where('booking_date', $item['booking_date'])
+                ->when($excludeBookingId, function ($q) use ($excludeBookingId) {
+                    $q->where('id', '!=', $excludeBookingId);
+                })
+        )
             ->with(['items' => function ($q) {
                 $q->whereNotIn('status', ['cancelled']);
             }])
@@ -1865,7 +1856,7 @@ private function validateRoomCapacityForItems(array $items, int $branchId, ?int 
         }
 
         if (($used + $requested) > $capacity) {
-            $errors[] = "Room {$room->name} sudah penuh untuk jam " . substr($start, 0, 5) . "–" . substr($end, 0, 5) . ". Kapasitas room: {$capacity} tamu.";
+            $errors[] = "Room {$room->name} sudah penuh untuk jam " . substr($start, 0, 5) . "–" . substr($end, 0, 5) . ". Terpakai: {$used}, diminta: {$requested}, kapasitas room: {$capacity} tamu.";
         }
     }
 
