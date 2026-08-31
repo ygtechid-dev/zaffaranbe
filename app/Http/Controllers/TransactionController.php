@@ -12,12 +12,41 @@ class TransactionController extends Controller
 {
    private function normalizePaymentMethodForPaymentsTable(?string $method): string
    {
-       $method = strtolower(trim((string) $method));
+       $rawMethod = trim((string) $method);
+       $method = strtolower($rawMethod);
+
+       if ($rawMethod !== '') {
+           $paymentMethod = DB::table('payment_methods')
+               ->whereRaw('LOWER(code) = ?', [$method])
+               ->orWhereRaw('LOWER(name) = ?', [$method])
+               ->first(['type', 'code', 'name']);
+
+           if ($paymentMethod) {
+               $type = strtolower((string) ($paymentMethod->type ?? ''));
+               if ($type === 'qris') return 'qris';
+               if (in_array($type, ['bank', 'transfer'], true)) return 'bank_transfer';
+               if ($type === 'edc') return 'edc';
+               if ($type === 'cash') return 'cash';
+               if ($type === 'ewallet') return 'qris';
+           }
+       }
+
+       if (str_contains($method, 'qris') || str_starts_with($method, 'qri')) {
+           return 'qris';
+       }
+
+       if (str_contains($method, 'virtual_account') || str_contains($method, 'virtual-account') || str_starts_with($method, 'va')) {
+           return 'virtual_account';
+       }
+
+       if (str_contains($method, 'transfer') || str_contains($method, 'bank')) {
+           return 'bank_transfer';
+       }
 
        return match ($method) {
-           'transfer', 'transf', 'bank', 'bank transfer' => 'bank_transfer',
-           'va', 'virtual-account', 'virtual account' => 'virtual_account',
-           'card', 'debit', 'credit_card', 'debit_card' => 'edc',
+           'transf' => 'bank_transfer',
+           'virtual account' => 'virtual_account',
+           'card', 'debit', 'credit_card', 'debit_card', 'credit card', 'debit card' => 'edc',
            default => $method ?: 'cash',
        };
    }
