@@ -22,6 +22,48 @@ class TransactionController extends Controller
        };
    }
 
+   private function normalizeServiceItem(array $item): array
+   {
+       $serviceId = !empty($item['service_id']) ? (int) $item['service_id'] : null;
+       $serviceVariantId = !empty($item['service_variant_id']) ? (int) $item['service_variant_id'] : null;
+
+       // Some older POS payloads sent service variant id in `variant_id`
+       // or even in `service_id`. Keep the DB FK safe by resolving it back
+       // to the parent services.id before creating bookings/transaction_items.
+       if (!$serviceVariantId && !empty($item['variant_id'])) {
+           $variantFromVariantId = \App\Models\ServiceVariant::find((int) $item['variant_id']);
+           if ($variantFromVariantId) {
+               $serviceVariantId = $variantFromVariantId->id;
+               if (!$serviceId || $serviceId === $serviceVariantId) {
+                   $serviceId = $variantFromVariantId->service_id;
+               }
+           }
+       }
+
+       $variant = $serviceVariantId ? \App\Models\ServiceVariant::find($serviceVariantId) : null;
+       if ($variant) {
+           $serviceId = $variant->service_id;
+       }
+
+       $service = $serviceId ? \App\Models\Service::find($serviceId) : null;
+       if (!$service && $serviceId) {
+           $variantFromServiceId = \App\Models\ServiceVariant::find($serviceId);
+           if ($variantFromServiceId) {
+               $serviceVariantId = $variantFromServiceId->id;
+               $serviceId = $variantFromServiceId->service_id;
+               $variant = $variantFromServiceId;
+               $service = \App\Models\Service::find($serviceId);
+           }
+       }
+
+       return [
+           'service_id' => $service ? $service->id : null,
+           'service_variant_id' => $variant ? $variant->id : null,
+           'service' => $service,
+           'variant' => $variant,
+       ];
+   }
+
    public function index(Request $request)
 {
     $query = Transaction::with(['booking', 'branch:id,name', 'cashier:id,name']);
@@ -193,8 +235,10 @@ class TransactionController extends Controller
 
                     // Use first service item for master booking details
                     $firstServiceItem = reset($serviceItems);
-                    $service = \App\Models\Service::find($firstServiceItem['service_id'] ?? null);
-                    $duration = $service ? ($service->duration ?? 60) : 60;
+                    $firstServiceMeta = $this->normalizeServiceItem($firstServiceItem);
+                    $service = $firstServiceMeta['service'];
+                    $variant = $firstServiceMeta['variant'];
+                    $duration = $variant ? ($variant->duration ?? ($service->duration ?? 60)) : ($service ? ($service->duration ?? 60) : 60);
 
                     $bookingDate = isset($firstServiceItem['booking_date'])
                         ? \Carbon\Carbon::parse($firstServiceItem['booking_date'])->toDateString()
@@ -215,7 +259,7 @@ class TransactionController extends Controller
                         'booking_ref' => 'B-POS-' . time() . '-' . rand(100, 999),
                         'user_id' => $userId,
                         'branch_id' => $request->branch_id,
-                        'service_id' => $firstServiceItem['service_id'] ?? null,
+                        'service_id' => $firstServiceMeta['service_id'],
                         'therapist_id' => $firstServiceItem['therapist_id'] ?? null,
                         'room_id' => $roomId,
                         'booking_date' => $bookingDate,
@@ -237,14 +281,17 @@ class TransactionController extends Controller
 
                     // Create Booking Items for service items only
                     foreach ($serviceItems as $index => $item) {
-                        $itemService = \App\Models\Service::find($item['service_id'] ?? null);
-                        $itemDuration = $itemService ? ($itemService->duration ?? 60) : 60;
+                        $itemServiceMeta = $this->normalizeServiceItem($item);
+                        $itemService = $itemServiceMeta['service'];
+                        $itemVariant = $itemServiceMeta['variant'];
+                        $itemDuration = $itemVariant ? ($itemVariant->duration ?? ($itemService->duration ?? 60)) : ($itemService ? ($itemService->duration ?? 60) : 60);
                         $itemStartTime = isset($item['start_time']) ? \Carbon\Carbon::parse($item['start_time'])->format('H:i:s') : $startTime;
                         $itemEndTime = \Carbon\Carbon::parse($bookingDate . ' ' . $itemStartTime)->addMinutes($itemDuration)->toTimeString();
 
                         \App\Models\BookingItem::create([
                             'booking_id' => $newBooking->id,
-                            'service_id' => $item['service_id'] ?? null,
+                            'service_id' => $itemServiceMeta['service_id'],
+                            'service_variant_id' => $itemServiceMeta['service_variant_id'],
                             'therapist_id' => $item['therapist_id'] ?? null,
                             'room_id' => $item['room_id'] ?? $roomId,
                             'price' => $item['price'] ?? 0,
@@ -288,13 +335,14 @@ class TransactionController extends Controller
                 foreach ($request->items as $item) {
                     $itemType = $item['item_type'] ?? (isset($item['product_id']) && $item['product_id'] ? 'product' : 'service');
                     $qty = $item['quantity'] ?? 1;
+                    $serviceItemMeta = $itemType === 'service' ? $this->normalizeServiceItem($item) : null;
 
                     \App\Models\TransactionItem::create([
                         'transaction_id' => $transaction->id,
                         'type' => $itemType,
-                        'service_id' => $item['service_id'] ?? null,
+                        'service_id' => $itemType === 'service' ? ($serviceItemMeta['service_id'] ?? null) : null,
                         'product_id' => $item['product_id'] ?? null,
-                        'variant_id' => $item['variant_id'] ?? null,
+                        'variant_id' => $itemType === 'product' ? ($item['variant_id'] ?? null) : null,
                         'therapist_id' => $item['therapist_id'] ?? null,
                         'quantity' => $qty,
                         'price' => $item['price'] ?? 0,
